@@ -1,4 +1,4 @@
-# Generative Design Studio
+# Node manager
 
 A node-based canvas editor for building AI image generation workflows. Built with Svelte 5, WebGPU, and Yjs.
 
