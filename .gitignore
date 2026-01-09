@@ -1,0 +1,66 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+.Spotlight-V100
+.Trashes
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# TypeScript cache
+*.tsbuildinfo
+
+# User data directory - preserve structure, ignore contents
+data/*
+!data/.gitkeep
+!data/input/
+data/input/*
+!data/input/.gitkeep
+!data/models/
+data/models/*
+!data/models/.gitkeep
+!data/output/
+data/output/*
+!data/output/.gitkeep
+!data/canvases/
+data/canvases/*
+!data/canvases/.gitkeep
+
+# Large model files anywhere
+*.safetensors
+*.onnx
+*.pt
+*.pth
+*.bin
+*.ckpt
+
+# Generated/temporary files
+*.tmp
+*.temp
+
+# Test coverage
+coverage/
+
+# Cursor IDE
+.cursor/
