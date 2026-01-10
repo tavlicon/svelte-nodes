@@ -491,7 +491,7 @@
   
   /* Expanded panel */
   .panel {
-    width: 280px;
+    width: 549px;
     background: var(--bg-primary);
     border-right: 1px solid var(--border-subtle);
     display: flex;
@@ -721,8 +721,8 @@
   /* File grid for images */
   .file-grid {
     display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
+    grid-template-columns: repeat(3, 165px);
+    gap: 9px;
   }
   
   .file-card {
@@ -756,7 +756,8 @@
   }
   
   .file-thumbnail {
-    aspect-ratio: 1;
+    width: 165px;
+    height: 165px;
     overflow: hidden;
     background: var(--bg-tertiary);
   }

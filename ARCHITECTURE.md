@@ -1,123 +1,8 @@
-# Node manager
+# Architecture Overview
 
-A node-based canvas editor for building AI image generation workflows. Built with Svelte 5, WebGPU, and Yjs.
+A comprehensive guide to the Generative Design Studio architecture.
 
-## Features
-
-- **Node-Based Canvas**: GPU-accelerated infinite canvas with drag-and-drop node creation
-- **WebGPU/Canvas2D Rendering**: Hardware-accelerated rendering with automatic fallback
-- **Visual Connections**: Bezier curve connectors with snap-to-port and type validation
-- **Asset Management**: Drag and drop images and models from sidebar or desktop
-- **Undo/Redo**: 5-level history with keyboard shortcuts (⌘Z / ⇧⌘Z)
-- **Light/Dark Theme**: Toggle between themes with persistent preference
-- **Local File Storage**: Assets stored locally in `data/` directory
-
-## Requirements
-
-- Modern browser with WebGPU support (recommended):
-  - Chrome 113+
-  - Edge 113+
-  - Safari 18+
-- Falls back to Canvas 2D for older browsers
-- Node.js 18+
-
-## Quick Start
-
-```bash
-# Install dependencies
-npm install
-
-# Start development server
-npm run dev
-
-# Open http://localhost:5173
-```
-
-## Usage
-
-### Adding Nodes
-- Click **+ Add Node** in the toolbar
-- Drag images from the **Assets** sidebar onto the canvas
-- Drag models from the **Models** sidebar onto the canvas
-- Drag files from your desktop onto the canvas
-
-### Connecting Nodes
-- Hover over a node to see its ports
-- Drag from an **output port** (right side) to an **input port** (left side)
-- Compatible ports snap together automatically
-- Click a connection to select it, press Delete to remove
-
-### Editing
-- Click a node to select it and view properties
-- Drag nodes to reposition them
-- Shift+click for multi-select
-- Click and drag on empty canvas to marquee select
-
-### Navigation
-- **Pan**: Space + drag, or middle-mouse drag
-- **Zoom**: Mouse wheel or pinch gesture
-- **Zoom Controls**: Use dropdown in toolbar (⌘1 fit, ⌘+ in, ⌘- out)
-
-## Node Types
-
-### Image
-Input node for images. Drag images onto the canvas or from the Assets sidebar.
-
-### Model
-AI model node. Supports SafeTensors, ONNX, and PyTorch formats. Has prompt and image inputs, image output.
-
-## Project Structure
-
-```
-├── data/               # Local storage (gitignored contents)
-│   ├── input/         # Uploaded images
-│   ├── models/        # AI models (.safetensors, .onnx, etc.)
-│   ├── output/        # Generated images
-│   └── canvases/      # Saved workflows
-├── server/            # Vite dev server plugins
-├── src/
-│   ├── lib/
-│   │   ├── canvas/    # WebGPU/Canvas2D rendering
-│   │   ├── graph/     # Node graph logic & store
-│   │   ├── inference/ # AI model runtime (planned)
-│   │   ├── persistence/ # Storage adapters
-│   │   ├── services/  # File service API
-│   │   ├── ui/        # Svelte components
-│   │   └── workers/   # Web Workers
-│   └── main.ts
-└── index.html
-```
-
-## Development
-
-```bash
-# Type checking
-npm run check
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
-```
-
-## Keyboard Shortcuts
-
-| Key | Action |
-|-----|--------|
-| ⌘Z | Undo |
-| ⇧⌘Z | Redo |
-| Delete/Backspace | Delete selected |
-| Escape | Deselect all |
-| Shift+Click | Multi-select |
-| Space+Drag | Pan canvas |
-| ⌘1 | Zoom to fit |
-| ⌘+ | Zoom in |
-| ⌘- | Zoom out |
-
-## Architecture
-
-### System Overview
+## System Diagram
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────┐
@@ -203,54 +88,114 @@ npm run preview
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Layer Details
+---
 
-#### UI Layer (Svelte 5 + Runes)
+## Layer Details
 
-| Component | Purpose |
-|-----------|---------|
-| `Canvas.svelte` | Main canvas with pointer events, DOM overlays, SVG edges, zoom/pan |
-| `Sidebar.svelte` | Asset browser (images, models, canvases) with drag-drop & click-to-add |
-| `Toolbar.svelte` | Zoom controls, undo/redo buttons, theme toggle |
-| `NodePanel.svelte` | Properties panel for selected node |
-| `ParameterEditor.svelte` | Dynamic form for node parameters |
+### 1. UI Layer (Svelte 5 + Runes)
 
-#### Rendering Layer
+The UI is built with Svelte 5 using the new runes API (`$state`, `$derived`, `$effect`).
 
-- **WebGPU** (`renderer.ts`) – GPU-accelerated with WGSL shaders for grid, nodes, wires
-- **Canvas2D** (`renderer-2d.ts`) – Fallback for older browsers
-- **DOM Overlays** – Image/model nodes rendered as positioned `<div>` elements
-- **SVG Overlay** – Bezier curve edges rendered in SVG for crisp rendering at any zoom
+| Component | File | Purpose |
+|-----------|------|---------|
+| **Canvas** | `Canvas.svelte` | Main canvas with pointer events, DOM overlays, SVG edges, zoom/pan |
+| **Sidebar** | `Sidebar.svelte` | Asset browser (images, models, canvases) with drag-drop & click-to-add |
+| **Toolbar** | `Toolbar.svelte` | Zoom controls, undo/redo buttons, theme toggle |
+| **NodePanel** | `NodePanel.svelte` | Properties panel for selected node |
+| **ParameterEditor** | `ParameterEditor.svelte` | Dynamic form for node parameters |
 
-#### State Management (Yjs CRDT + Svelte 5 Runes)
+#### Key Patterns
 
-- **Yjs Document** – Conflict-free replicated data type, ready for real-time collaboration
-- **Reactive Maps** – `nodes`, `edges`, `selectedNodeIds`, `camera` with `$state`
-- **Undo/Redo** – 5-level action history
+- **Reactive state** via `$state` runes
+- **Derived values** via `$derived.by()` for computed overlays
+- **Effects** via `$effect` for side effects (rendering, event listeners)
+- **Version counters** (`nodesVersion`) to force reactivity on Map mutations
 
-#### Orchestration Layer (Execution Engine)
+---
 
-- `buildGraph()` – Creates dependency DAG from edges
-- `markDirty()` – Propagates changes to dependents
-- `topologicalSort()` – Determines execution order
-- `execute()` – Runs nodes in dependency order
-- `gatherInputs()` – Collects outputs from upstream nodes
+### 2. Rendering Layer
 
-#### Inference Layer (Web Workers + ONNX Runtime)
+Dual-renderer architecture with automatic fallback.
 
-- **InferenceManager** – Singleton that queues requests and communicates with worker
-- **inference.worker.ts** – Off-main-thread execution via Web Worker
-- **onnxruntime-web** – Configured for WebGPU/WASM acceleration
+#### WebGPU Renderer (`renderer.ts`)
 
-#### Persistence Layer
+- GPU-accelerated instanced rendering
+- WGSL shaders for:
+  - `grid.wgsl` – Dot grid pattern
+  - `nodes.wgsl` – Node rectangles with SDF corners
+  - `wires.wgsl` – Bezier curve connections
+- Uses `effectiveZoom = camera.zoom * dpr` for HiDPI
 
-| Storage | Purpose | Status |
-|---------|---------|--------|
-| **File API** (Vite plugin) | Serves/uploads files from `data/` | ✅ Working |
-| **IndexedDB** | Projects, snapshots, assets, settings | ✅ Scaffolded |
-| **Service Worker** | Model caching | 🚧 Planned |
+#### Canvas2D Fallback (`renderer-2d.ts`)
 
-### Node Types
+- Used when WebGPU unavailable
+- Same API surface as WebGPU renderer
+- Simpler but still performant for typical graphs
+
+#### DOM Overlays
+
+- **Image/Model nodes** – Positioned `<div>` elements with `<img>` inside
+- **Port handles** – Circular buttons on hover
+- **SVG edges** – Bezier paths for reliable cross-browser rendering
+- **Selection bounds** – Subtle border around selected nodes
+
+---
+
+### 3. State Management
+
+#### Graph Store (`store.svelte.ts`)
+
+Built on Yjs CRDT for future collaborative editing.
+
+```typescript
+// Core state
+let nodes = $state<Map<string, NodeInstance>>(new Map());
+let edges = $state<Map<string, Edge>>(new Map());
+let selectedNodeIds = $state<Set<string>>(new Set());
+let camera = $state<Camera>({ x: 0, y: 0, zoom: 1 });
+
+// Undo/Redo (5-level history)
+let undoStack = $state<Action[]>([]);
+let redoStack = $state<Action[]>([]);
+```
+
+#### Key Operations
+
+| Method | Purpose |
+|--------|---------|
+| `addNode()` | Create node, push to undo stack |
+| `deleteSelectedNodes()` | Remove nodes + connected edges |
+| `addEdge()` | Connect ports, validate compatibility |
+| `undo()` / `redo()` | Traverse action history |
+| `recordMoveStart()` / `recordMoveEnd()` | Batch position changes |
+
+---
+
+### 4. Orchestration Layer
+
+#### Execution Engine (`execution.ts`)
+
+Handles dependency resolution and execution scheduling.
+
+```typescript
+class ExecutionEngine {
+  // Build dependency graph from edges
+  buildGraph(nodes, edges) { ... }
+  
+  // Mark node + dependents as dirty
+  markDirty(nodeId) { ... }
+  
+  // Topological sort for execution order
+  topologicalSort(): string[] { ... }
+  
+  // Execute all dirty nodes in order
+  async execute() { ... }
+}
+```
+
+#### Node Registry (`nodes/registry.ts`)
+
+Defines available node types:
 
 | Type | Category | Inputs | Outputs |
 |------|----------|--------|---------|
@@ -260,47 +205,219 @@ npm run preview
 | `sdxl-turbo` | Generate | `prompt`, `negative_prompt` | `image` |
 | `image-display` | Output | `image` | — |
 
-### AI Pipeline Status
+#### Port Types
 
-#### ✅ Implemented
+```typescript
+type PortType = 'string' | 'image' | 'tensor' | 'number' | 'any';
+
+// Compatibility check
+function arePortsCompatible(outputType, inputType): boolean {
+  if (inputType === 'any' || outputType === 'any') return true;
+  return outputType === inputType;
+}
+```
+
+---
+
+### 5. Inference Layer
+
+#### Inference Manager (`inference/manager.ts`)
+
+Coordinates inference requests across workers.
+
+```typescript
+interface InferenceRequest {
+  prompt: string;
+  negativePrompt?: string;
+  steps: number;
+  guidanceScale: number;
+  width: number;
+  height: number;
+  seed: number;
+}
+
+class InferenceManager {
+  // Queue requests
+  async runInference(request, onProgress?): Promise<InferenceResult>
+  
+  // Load model into worker
+  async loadModel(): Promise<void>
+  
+  // Check status
+  isModelLoaded(): boolean
+  isLoading(): boolean
+}
+```
+
+#### Web Worker (`workers/inference.worker.ts`)
+
+- Off-main-thread execution
+- ONNX Runtime with WebGPU/WASM
+- Message-based communication:
+  - `load-model` → `model-loaded` / `model-load-error`
+  - `run-inference` → `inference-progress` → `inference-complete`
+
+---
+
+### 6. Persistence Layer
+
+#### File Service (`services/file-service.ts`)
+
+REST client for file operations:
+
+```typescript
+listFiles(directory: 'input' | 'output' | 'models' | 'canvases')
+uploadFile(directory, file)
+deleteFile(directory, filename)
+```
+
+#### File API Plugin (`server/file-api.ts`)
+
+Vite dev server middleware:
+
+- `GET /api/files?dir=input` – List files
+- `POST /api/files?dir=input&name=file.png` – Upload
+- `DELETE /api/files?dir=input&name=file.png` – Delete
+- `GET /data/*` – Static file serving
+
+#### IndexedDB (`persistence/db.ts`)
+
+Browser-side storage (scaffolded):
+
+| Store | Purpose |
+|-------|---------|
+| `projects` | Project metadata |
+| `snapshots` | Yjs state vectors |
+| `assets` | Generated image blobs |
+| `settings` | User preferences |
+
+---
+
+## AI Pipeline Status
+
+### ✅ Implemented
 
 - Execution Engine with topological sort and dirty tracking
-- InferenceManager with queue, progress callbacks, and worker messaging
+- InferenceManager with queue, progress callbacks, worker messaging
 - Web Worker scaffold with ONNX Runtime imported
 - Node Registry with model node type defined
 - Port System with type compatibility checking
 - File System for loading models from `data/models/`
 
-#### 🚧 Needs Implementation
+### 🚧 Needs Implementation
 
-- Actual ONNX Model Loading (replace stub)
-- Pipeline Orchestration (text encoder → U-Net → VAE decoder)
-- Proper CLIP BPE Tokenizer
-- Real diffusion loop with scheduler
-- Model-specific nodes (SD 1.5, SDXL, ControlNet, LoRA)
+- **Actual ONNX Model Loading** – Replace `loadModel()` stub
+- **Pipeline Orchestration** – text encoder → U-Net → VAE decoder
+- **Proper CLIP BPE Tokenizer** – Currently using placeholder hash
+- **Real Diffusion Loop** – Scheduler, latent manipulation
+- **Model-Specific Nodes** – SD 1.5, SDXL, ControlNet, LoRA
 
-### Backend Options for Production
+---
+
+## Backend Options for Production
 
 | Option | Pros | Cons |
 |--------|------|------|
-| **Browser + ONNX Runtime WebGPU** | No server, runs on user's GPU | Limited VRAM |
-| **Node.js Backend** | Full filesystem access | Requires hosting |
-| **Python Backend (FastAPI)** | Full PyTorch/diffusers ecosystem | Separate service |
-| **Serverless (Replicate, Modal)** | Scale to zero | Latency, cost |
+| **Browser + ONNX WebGPU** | No server, user's GPU | Limited VRAM, model size |
+| **Node.js Backend** | Full filesystem, native ONNX | Requires hosting |
+| **Python Backend** | PyTorch/diffusers ecosystem | Separate service, GPU server |
+| **Serverless** | Scale to zero, pay per use | Latency, cost at scale |
 
-## Data Directory
+### Recommended: Hybrid Approach
 
-The `data/` directory stores local assets:
+1. **Browser inference** for small models (SDXL Turbo, ~2GB)
+2. **Optional backend API** for larger models/batches
+3. **WebSocket** for streaming progress updates
+4. **Service Worker** for model caching
 
-| Directory | Purpose |
-|-----------|---------|
-| `input/` | Uploaded images |
-| `models/` | AI model files |
-| `output/` | Generated images |
-| `canvases/` | Saved workflows (JSON) |
+---
 
-**Note**: Contents are gitignored. Only the directory structure is committed.
+## Data Flow Example
 
-## License
+```
+User drops image → Sidebar.svelte
+                        │
+                        ▼
+              Canvas.svelte (handleDrop)
+                        │
+                        ▼
+              graphStore.addNode('image', ...)
+                        │
+                        ▼
+              Yjs Document updated
+                        │
+                        ▼
+              nodesVersion++ (trigger reactivity)
+                        │
+                        ▼
+              DOM overlay rendered
+                        │
+                        ▼
+              User connects to model node
+                        │
+                        ▼
+              graphStore.addEdge(...)
+                        │
+                        ▼
+              executionEngine.markDirty(modelNodeId)
+                        │
+                        ▼
+              User clicks "Run"
+                        │
+                        ▼
+              executionEngine.execute()
+                        │
+                        ▼
+              Topological sort → [imageNode, modelNode]
+                        │
+                        ▼
+              inferenceManager.runInference(...)
+                        │
+                        ▼
+              Worker: load model, run pipeline
+                        │
+                        ▼
+              Progress callbacks → UI updates
+                        │
+                        ▼
+              Result → outputCache → thumbnail
+```
 
-MIT
+---
+
+## Key Files Reference
+
+```
+src/lib/
+├── canvas/
+│   ├── renderer.ts        # WebGPU renderer
+│   ├── renderer-2d.ts     # Canvas2D fallback
+│   ├── grid.wgsl          # Grid shader
+│   ├── nodes.wgsl         # Node shader
+│   ├── wires.wgsl         # Wire shader
+│   ├── ports.ts           # Port utilities
+│   └── camera.ts          # Camera math
+├── graph/
+│   ├── store.svelte.ts    # Yjs-backed store
+│   ├── execution.ts       # DAG execution engine
+│   ├── types.ts           # Core types
+│   └── nodes/registry.ts  # Node definitions
+├── inference/
+│   ├── manager.ts         # Inference coordinator
+│   ├── onnx.ts            # ONNX utilities
+│   └── sdxl-turbo.ts      # Pipeline stub
+├── persistence/
+│   ├── db.ts              # IndexedDB wrapper
+│   └── yjs-adapter.ts     # Yjs persistence
+├── services/
+│   └── file-service.ts    # File API client
+├── ui/
+│   ├── Canvas.svelte      # Main canvas
+│   ├── Sidebar.svelte     # Asset browser
+│   ├── Toolbar.svelte     # Top toolbar
+│   ├── NodePanel.svelte   # Properties panel
+│   └── theme.svelte.ts    # Theme state
+└── workers/
+    ├── inference.worker.ts # AI worker
+    └── preview.worker.ts   # Preview worker
+```
