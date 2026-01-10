@@ -1,107 +1,155 @@
-# Node manager
+# Generative Design Studio
 
-A node-based canvas editor for building AI image generation workflows. Built with Svelte 5, WebGPU, and Yjs.
+A node-based canvas editor for building AI image generation workflows. Built with Svelte 5, WebGPU, and a Python backend using Diffusers.
 
 ## Features
 
 - **Node-Based Canvas**: GPU-accelerated infinite canvas with drag-and-drop node creation
 - **WebGPU/Canvas2D Rendering**: Hardware-accelerated rendering with automatic fallback
 - **Visual Connections**: Bezier curve connectors with snap-to-port and type validation
+- **SD 1.5 img2img**: Local Stable Diffusion inference using Diffusers library
+- **Output Node**: Auto-generated output node shows result with file path
 - **Asset Management**: Drag and drop images and models from sidebar or desktop
 - **Undo/Redo**: 5-level history with keyboard shortcuts (⌘Z / ⇧⌘Z)
 - **Light/Dark Theme**: Toggle between themes with persistent preference
-- **Local File Storage**: Assets stored locally in `data/` directory
+- **Local File Storage**: All assets stored locally in `data/` directory
+
+## Architecture Overview
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                    GENERATIVE DESIGN STUDIO                     │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  ┌──────────────────┐         ┌──────────────────────────────┐ │
+│  │   FRONTEND       │  HTTP   │   BACKEND (Python)           │ │
+│  │   (Svelte 5)     │ ──────► │   FastAPI + Diffusers        │ │
+│  │                  │         │                              │ │
+│  │  • Node Editor   │         │  • Loads SD 1.5 model        │ │
+│  │  • WebGPU Canvas │         │  • Runs on MPS/CUDA/CPU      │ │
+│  │  • Parameters    │         │  • img2img inference         │ │
+│  │  • Output Display│ ◄────── │  • Returns generated image   │ │
+│  └──────────────────┘         └──────────────────────────────┘ │
+│        localhost:5173              localhost:8000              │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Note**: This is a standalone application. It does NOT use ComfyUI or any external inference service.
 
 ## Requirements
 
-- Modern browser with WebGPU support (recommended):
-  - Chrome 113+
-  - Edge 113+
-  - Safari 18+
-- Falls back to Canvas 2D for older browsers
+### Frontend
 - Node.js 18+
+- Modern browser with WebGPU support (recommended):
+  - Chrome 113+, Edge 113+, Safari 18+
+- Falls back to Canvas 2D for older browsers
+
+### Backend
+- Python 3.10+
+- ~8GB RAM (for model loading)
+- GPU recommended:
+  - **Apple Silicon** (M1/M2/M3): Uses MPS acceleration
+  - **NVIDIA GPU**: Uses CUDA acceleration
+  - **CPU**: Works but slower (~30s/image)
 
 ## Quick Start
 
+### 1. Clone and Install Frontend
+
 ```bash
-# Install dependencies
+git clone https://github.com/yourusername/generative-design-studio-2.git
+cd generative-design-studio-2
+
+# Install frontend dependencies
 npm install
-
-# Start development server
-npm run dev
-
-# Open http://localhost:5173
 ```
+
+### 2. Set Up Python Backend
+
+```bash
+cd backend
+python3 -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 3. Download Model Files (Offline Setup)
+
+For fully offline operation, download these files from HuggingFace and place them in `data/models/sd-v1-5-local/`:
+
+```
+data/models/sd-v1-5-local/
+├── model_index.json
+├── scheduler/
+│   └── scheduler_config.json
+├── text_encoder/
+│   ├── config.json
+│   └── model.safetensors (~492 MB)
+├── tokenizer/
+│   ├── merges.txt
+│   ├── special_tokens_map.json
+│   ├── tokenizer_config.json
+│   └── vocab.json
+├── unet/
+│   ├── config.json
+│   └── diffusion_pytorch_model.safetensors (~3.4 GB)
+└── vae/
+    ├── config.json
+    └── diffusion_pytorch_model.safetensors (~335 MB)
+```
+
+Download links (from `runwayml/stable-diffusion-v1-5`):
+- All config files: https://huggingface.co/runwayml/stable-diffusion-v1-5/tree/main
+- Model weights: Download the `.safetensors` files for each component
+
+### 4. Start the Backend
+
+```bash
+cd backend
+source venv/bin/activate
+python server.py
+```
+
+The server will start on `http://localhost:8000` and show:
+```
+✅ Model loaded successfully (offline mode)!
+Backend: MPS | Model: v1-5-pruned-emaonly-fp16
+```
+
+### 5. Start the Frontend
+
+```bash
+# In a new terminal, from project root
+npm run dev
+```
+
+Open `http://localhost:5173`
+
+The toolbar will show backend status:
+- **🟢 MPS/CUDA/CPU** - Connected with model loaded
+- **🟡 SIMULATION** - Backend offline, using simulation mode
 
 ## Usage
 
-### Adding Nodes
-- Click **+ Add Node** in the toolbar
-- Drag images from the **Assets** sidebar onto the canvas
-- Drag models from the **Models** sidebar onto the canvas
-- Drag files from your desktop onto the canvas
+### Creating an img2img Workflow
 
-### Connecting Nodes
-- Hover over a node to see its ports
-- Drag from an **output port** (right side) to an **input port** (left side)
-- Compatible ports snap together automatically
-- Click a connection to select it, press Delete to remove
+1. **Add Input Image**: Click Assets → Imported → Click an image to add to canvas
+2. **Add Model Node**: Click Models → Click the model to add
+3. **Connect Nodes**: Drag from Image output (right) → Model input (left)
+4. **Configure Parameters**:
+   - **Positive Prompt**: What you want to see
+   - **Negative Prompt**: What to avoid
+   - **Steps**: Denoising steps (3-50, more = better quality)
+   - **CFG Scale**: Prompt strength (1-20)
+   - **Sampler**: LCM (fast), Euler, DPM++, etc.
+   - **Denoise**: How much to change (0-1, higher = more change)
+5. **Run**: Click **▶ Run** in toolbar
+6. **Output**: An Output node appears automatically showing:
+   - Generated image preview
+   - File path in `data/output/`
+   - Generation time
 
-### Editing
-- Click a node to select it and view properties
-- Drag nodes to reposition them
-- Shift+click for multi-select
-- Click and drag on empty canvas to marquee select
-
-### Navigation
-- **Pan**: Space + drag, or middle-mouse drag
-- **Zoom**: Mouse wheel or pinch gesture
-- **Zoom Controls**: Use dropdown in toolbar (⌘1 fit, ⌘+ in, ⌘- out)
-
-## Node Types
-
-### Image
-Input node for images. Drag images onto the canvas or from the Assets sidebar.
-
-### Model
-AI model node. Supports SafeTensors, ONNX, and PyTorch formats. Has prompt and image inputs, image output.
-
-## Project Structure
-
-```
-├── data/               # Local storage (gitignored contents)
-│   ├── input/         # Uploaded images
-│   ├── models/        # AI models (.safetensors, .onnx, etc.)
-│   ├── output/        # Generated images
-│   └── canvases/      # Saved workflows
-├── server/            # Vite dev server plugins
-├── src/
-│   ├── lib/
-│   │   ├── canvas/    # WebGPU/Canvas2D rendering
-│   │   ├── graph/     # Node graph logic & store
-│   │   ├── inference/ # AI model runtime (planned)
-│   │   ├── persistence/ # Storage adapters
-│   │   ├── services/  # File service API
-│   │   ├── ui/        # Svelte components
-│   │   └── workers/   # Web Workers
-│   └── main.ts
-└── index.html
-```
-
-## Development
-
-```bash
-# Type checking
-npm run check
-
-# Build for production
-npm run build
-
-# Preview production build
-npm run preview
-```
-
-## Keyboard Shortcuts
+### Keyboard Shortcuts
 
 | Key | Action |
 |-----|--------|
@@ -115,191 +163,138 @@ npm run preview
 | ⌘+ | Zoom in |
 | ⌘- | Zoom out |
 
-## Architecture
+## Node Types
 
-### System Overview
+| Type | Category | Description |
+|------|----------|-------------|
+| **Image** | Input | Source image for img2img |
+| **Model** | Model | SD 1.5 img2img processor with prompts & sampler params |
+| **Output** | Output | Auto-created, shows generated image and file path |
+
+## Project Structure
 
 ```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                           UI LAYER (Svelte 5)                          │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Canvas.svelte  │  Sidebar.svelte  │  Toolbar.svelte  │  NodePanel     │
-│  (interaction,  │  (asset browser, │  (zoom, undo,    │  (properties,  │
-│   overlays)     │   file cards)    │   theme toggle)  │   parameters)  │
-└────────┬────────┴────────┬─────────┴────────┬─────────┴────────┬───────┘
-         │                 │                  │                  │
-         ▼                 ▼                  ▼                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                       RENDERING LAYER                                   │
-├─────────────────────────────────────────────────────────────────────────┤
-│  WebGPU Renderer        │  Canvas2D Fallback   │  DOM Overlays (images,│
-│  (renderer.ts)          │  (renderer-2d.ts)    │   models, ports, SVG  │
-│  • Grid (grid.wgsl)     │  • Grid drawing      │   edges)              │
-│  • Nodes (nodes.wgsl)   │  • Node rectangles   │                       │
-│  • Wires (wires.wgsl)   │  • Ports, selection  │                       │
-└────────┬────────────────┴────────────────────┴──────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      STATE MANAGEMENT                                   │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Graph Store (store.svelte.ts)              │  Theme Store             │
-│  • Yjs CRDT Document (collaborative-ready)  │  (theme.svelte.ts)       │
-│  • Nodes Map, Edges Map                     │  • Light/Dark toggle     │
-│  • Selection state                          │                          │
-│  • Undo/Redo (5-level history)              │                          │
-│  • Camera position & zoom                   │                          │
-└────────┬────────────────────────────────────┴──────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      ORCHESTRATION LAYER                                │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Execution Engine (execution.ts)            │  Node Registry           │
-│  • Topological sort of dirty nodes          │  (nodes/registry.ts)     │
-│  • Dependency resolution (DAG)              │  • Node definitions      │
-│  • Input gathering from connected nodes     │  • Port types & colors   │
-│  • Status tracking (idle→running→complete)  │  • Default parameters    │
-│  • Output caching                           │                          │
-└────────┬────────────────────────────────────┴──────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      INFERENCE LAYER                                    │
-├─────────────────────────────────────────────────────────────────────────┤
-│  Inference Manager (inference/manager.ts)   │  ONNX Runtime            │
-│  • Request queue                            │  (onnxruntime-web)       │
-│  • Progress callbacks                       │  • WebGPU acceleration   │
-│  • Worker communication                     │  • WASM fallback         │
-│                                             │                          │
-│  Web Worker (workers/inference.worker.ts)   │  Model Loader            │
-│  • Off-main-thread inference                │  (sdxl-turbo.ts - stub)  │
-│  • ONNX session management                  │  • Pipeline orchestration│
-└────────┬────────────────────────────────────┴──────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      PERSISTENCE LAYER                                  │
-├─────────────────────────────────────────────────────────────────────────┤
-│  File Service (services/file-service.ts)    │  IndexedDB (db.ts)       │
-│  • REST API client                          │  • Projects              │
-│  • List/Upload/Delete files                 │  • Snapshots (Yjs state) │
-│                                             │  • Generated assets      │
-│  File API Plugin (server/file-api.ts)       │  • Settings              │
-│  • Vite dev server middleware               │                          │
-│  • Static file serving from /data           │  Yjs Adapter             │
-│  • CRUD operations                          │  (yjs-adapter.ts)        │
-└────────┬────────────────────────────────────┴──────────────────────────┘
-         │
-         ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      FILE SYSTEM                                        │
-├─────────────────────────────────────────────────────────────────────────┤
-│  data/                                                                  │
-│  ├── input/      → Uploaded images (.png, .jpg, .webp, etc.)           │
-│  ├── models/     → AI models (.safetensors, .onnx, .pt, .ckpt)         │
-│  ├── output/     → Generated images                                    │
-│  └── canvases/   → Saved workflows (.json)                             │
-└─────────────────────────────────────────────────────────────────────────┘
+├── backend/              # Python inference server
+│   ├── server.py        # FastAPI server with Diffusers
+│   ├── requirements.txt # Python dependencies
+│   └── venv/            # Python virtual environment
+├── data/                 # Local storage (gitignored contents)
+│   ├── input/           # Uploaded images
+│   ├── models/          # AI models
+│   │   └── sd-v1-5-local/  # Diffusers-format SD 1.5
+│   ├── output/          # Generated images (img2img_TIMESTAMP_SEED.png)
+│   └── canvases/        # Saved workflows
+├── src/
+│   ├── lib/
+│   │   ├── canvas/      # WebGPU/Canvas2D rendering
+│   │   ├── graph/       # Node graph logic & store
+│   │   │   ├── execution.ts   # Topological execution engine
+│   │   │   ├── store.svelte.ts # Yjs-backed reactive store
+│   │   │   └── nodes/registry.ts # Node type definitions
+│   │   ├── inference/   # Backend communication
+│   │   │   └── manager.ts # HTTP client for img2img API
+│   │   ├── ui/          # Svelte components
+│   │   └── workers/     # Web Workers (fallback)
+│   └── main.ts
+└── index.html
 ```
 
-### Layer Details
+## Backend API
 
-#### UI Layer (Svelte 5 + Runes)
+### `GET /api/model/info`
+Returns model status:
+```json
+{
+  "loaded": true,
+  "model_name": "v1-5-pruned-emaonly-fp16",
+  "device": "mps"
+}
+```
 
-| Component | Purpose |
-|-----------|---------|
-| `Canvas.svelte` | Main canvas with pointer events, DOM overlays, SVG edges, zoom/pan |
-| `Sidebar.svelte` | Asset browser (images, models, canvases) with drag-drop & click-to-add |
-| `Toolbar.svelte` | Zoom controls, undo/redo buttons, theme toggle |
-| `NodePanel.svelte` | Properties panel for selected node |
-| `ParameterEditor.svelte` | Dynamic form for node parameters |
+### `POST /api/img2img`
+Performs img2img generation. Form data:
+- `image`: Input image file
+- `positive_prompt`: Text prompt
+- `negative_prompt`: Negative prompt
+- `seed`: Random seed (int)
+- `steps`: Inference steps (int)
+- `cfg`: Guidance scale (float)
+- `sampler_name`: Sampler type
+- `scheduler`: Scheduler type
+- `denoise`: Denoising strength (0-1)
 
-#### Rendering Layer
+Returns:
+```json
+{
+  "image": "data:image/png;base64,...",
+  "output_path": "/path/to/data/output/img2img_123456_42.png",
+  "time_taken": 8.5,
+  "width": 512,
+  "height": 512
+}
+```
 
-- **WebGPU** (`renderer.ts`) – GPU-accelerated with WGSL shaders for grid, nodes, wires
-- **Canvas2D** (`renderer-2d.ts`) – Fallback for older browsers
-- **DOM Overlays** – Image/model nodes rendered as positioned `<div>` elements
-- **SVG Overlay** – Bezier curve edges rendered in SVG for crisp rendering at any zoom
+## Troubleshooting
 
-#### State Management (Yjs CRDT + Svelte 5 Runes)
+### 403 WebSocket Errors in Terminal
 
-- **Yjs Document** – Conflict-free replicated data type, ready for real-time collaboration
-- **Reactive Maps** – `nodes`, `edges`, `selectedNodeIds`, `camera` with `$state`
-- **Undo/Redo** – 5-level action history
+```
+WebSocket /ws?clientId=xxx" 403
+connection rejected (403 Forbidden)
+```
 
-#### Orchestration Layer (Execution Engine)
+This is **harmless**. It's caused by ComfyUI (if installed) trying to connect to port 8000. Our server correctly rejects these. To stop the messages:
+- Close ComfyUI app/browser tab, OR
+- Run our server on a different port: `uvicorn server:app --port 8001`
 
-- `buildGraph()` – Creates dependency DAG from edges
-- `markDirty()` – Propagates changes to dependents
-- `topologicalSort()` – Determines execution order
-- `execute()` – Runs nodes in dependency order
-- `gatherInputs()` – Collects outputs from upstream nodes
+### Black/Corrupt Output Images
 
-#### Inference Layer (Web Workers + ONNX Runtime)
+If generated images are black, the server automatically applies a fix for MPS (Apple Silicon) by running in float32 mode. Check the server logs for:
+```
+Pipeline running in float32 for MPS stability
+```
 
-- **InferenceManager** – Singleton that queues requests and communicates with worker
-- **inference.worker.ts** – Off-main-thread execution via Web Worker
-- **onnxruntime-web** – Configured for WebGPU/WASM acceleration
+### Model Not Loading
 
-#### Persistence Layer
+1. Ensure all model files are in `data/models/sd-v1-5-local/`
+2. Check file sizes match expected:
+   - `unet/diffusion_pytorch_model.safetensors`: ~3.4 GB
+   - `vae/diffusion_pytorch_model.safetensors`: ~335 MB
+   - `text_encoder/model.safetensors`: ~492 MB
+3. Check server logs for specific errors
 
-| Storage | Purpose | Status |
-|---------|---------|--------|
-| **File API** (Vite plugin) | Serves/uploads files from `data/` | ✅ Working |
-| **IndexedDB** | Projects, snapshots, assets, settings | ✅ Scaffolded |
-| **Service Worker** | Model caching | 🚧 Planned |
+### Simulation Mode (Yellow Indicator)
 
-### Node Types
+If frontend shows "SIMULATION" instead of "MPS/CUDA":
+1. Ensure backend is running: `curl http://localhost:8000/api/model/info`
+2. Check backend loaded model: look for "✅ Model loaded" in server logs
+3. Refresh frontend page
 
-| Type | Category | Inputs | Outputs |
-|------|----------|--------|---------|
-| `prompt` | Input | — | `text: string` |
-| `image` | Input | — | `image: image` |
-| `model` | Model | `prompt`, `image` | `image` |
-| `sdxl-turbo` | Generate | `prompt`, `negative_prompt` | `image` |
-| `image-display` | Output | `image` | — |
+## Performance
 
-### AI Pipeline Status
+| Hardware | Speed | Notes |
+|----------|-------|-------|
+| Apple M1/M2/M3 | ~8-12s/image | Uses MPS, float32 for stability |
+| NVIDIA RTX 3080+ | ~3-5s/image | Uses CUDA, float16 |
+| CPU | ~30-60s/image | Not recommended |
 
-#### ✅ Implemented
+Tips:
+- Use fewer steps (3-10 with LCM sampler)
+- Lower CFG scale (2-4 with LCM)
+- Use 512x512 input images
 
-- Execution Engine with topological sort and dirty tracking
-- InferenceManager with queue, progress callbacks, and worker messaging
-- Web Worker scaffold with ONNX Runtime imported
-- Node Registry with model node type defined
-- Port System with type compatibility checking
-- File System for loading models from `data/models/`
+## Development
 
-#### 🚧 Needs Implementation
+```bash
+# Type checking
+npm run check
 
-- Actual ONNX Model Loading (replace stub)
-- Pipeline Orchestration (text encoder → U-Net → VAE decoder)
-- Proper CLIP BPE Tokenizer
-- Real diffusion loop with scheduler
-- Model-specific nodes (SD 1.5, SDXL, ControlNet, LoRA)
+# Build for production
+npm run build
 
-### Backend Options for Production
-
-| Option | Pros | Cons |
-|--------|------|------|
-| **Browser + ONNX Runtime WebGPU** | No server, runs on user's GPU | Limited VRAM |
-| **Node.js Backend** | Full filesystem access | Requires hosting |
-| **Python Backend (FastAPI)** | Full PyTorch/diffusers ecosystem | Separate service |
-| **Serverless (Replicate, Modal)** | Scale to zero | Latency, cost |
-
-## Data Directory
-
-The `data/` directory stores local assets:
-
-| Directory | Purpose |
-|-----------|---------|
-| `input/` | Uploaded images |
-| `models/` | AI model files |
-| `output/` | Generated images |
-| `canvases/` | Saved workflows (JSON) |
-
-**Note**: Contents are gitignored. Only the directory structure is committed.
+# Preview production build
+npm run preview
+```
 
 ## License
 

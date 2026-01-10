@@ -1,6 +1,6 @@
 <script lang="ts">
   import { graphStore } from '../graph/store.svelte';
-  import { nodeRegistry } from '../graph/nodes/registry';
+  import { nodeRegistry, type ExtendedNodeDefinition } from '../graph/nodes/registry';
   import ParameterEditor from './ParameterEditor.svelte';
   
   // Get first selected node
@@ -14,6 +14,18 @@
     if (!selectedNode) return null;
     return nodeRegistry[selectedNode.type] ?? null;
   });
+  
+  // Check if node has prompts group
+  let hasPrompts = $derived.by(() => {
+    if (!nodeDef?.parameterMeta) return false;
+    return Object.values(nodeDef.parameterMeta).some(meta => meta.group === 'prompts');
+  });
+  
+  // Check if node has sampler params
+  let hasSamplerParams = $derived.by(() => {
+    if (!nodeDef?.parameterMeta) return false;
+    return Object.values(nodeDef.parameterMeta).some(meta => meta.group === 'sampler');
+  });
 </script>
 
 <aside class="node-panel">
@@ -24,13 +36,37 @@
     </header>
     
     <div class="panel-content">
-      <section class="params-section">
-        <h3 class="section-title">Parameters</h3>
-        <ParameterEditor 
-          node={selectedNode} 
-          definition={nodeDef}
-        />
-      </section>
+      {#if hasPrompts}
+        <section class="prompts-section">
+          <h3 class="section-title">Conditioning</h3>
+          <ParameterEditor 
+            node={selectedNode} 
+            definition={nodeDef}
+            filterGroup="prompts"
+          />
+        </section>
+      {/if}
+      
+      {#if hasSamplerParams}
+        <section class="params-section">
+          <h3 class="section-title">Sampler Parameters</h3>
+          <ParameterEditor 
+            node={selectedNode} 
+            definition={nodeDef}
+            filterGroup="sampler"
+          />
+        </section>
+      {/if}
+      
+      {#if !hasPrompts && !hasSamplerParams}
+        <section class="params-section">
+          <h3 class="section-title">Parameters</h3>
+          <ParameterEditor 
+            node={selectedNode} 
+            definition={nodeDef}
+          />
+        </section>
+      {/if}
       
       <section class="status-section">
         <h3 class="section-title">Status</h3>
@@ -53,6 +89,21 @@
           <div class="preview-image">
             <img src={selectedNode.thumbnailUrl} alt="Preview" />
           </div>
+        </section>
+      {/if}
+      
+      {#if selectedNode.type === 'output' && selectedNode.params.outputPath}
+        <section class="output-section">
+          <h3 class="section-title">Output Location</h3>
+          <div class="output-path">
+            <code class="path-text">{selectedNode.params.outputPath}</code>
+          </div>
+          {#if selectedNode.params.timeTaken}
+            <div class="output-meta">
+              <span class="meta-label">Generation time:</span>
+              <span class="meta-value">{(selectedNode.params.timeTaken / 1000).toFixed(2)}s</span>
+            </div>
+          {/if}
         </section>
       {/if}
     </div>
@@ -121,10 +172,16 @@
     padding: 16px;
   }
   
+  .prompts-section,
   .params-section,
   .status-section,
   .preview-section {
     margin-bottom: 24px;
+  }
+  
+  .prompts-section {
+    padding-bottom: 20px;
+    border-bottom: 1px solid var(--border-subtle);
   }
   
   .section-title {
@@ -204,5 +261,44 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
+  }
+  
+  .output-section {
+    margin-bottom: 24px;
+  }
+  
+  .output-path {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    margin-bottom: 12px;
+  }
+  
+  .path-text {
+    font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
+    font-size: 11px;
+    color: var(--success);
+    word-break: break-all;
+    line-height: 1.5;
+  }
+  
+  .output-meta {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+  }
+  
+  .meta-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  
+  .meta-value {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
   }
 </style>

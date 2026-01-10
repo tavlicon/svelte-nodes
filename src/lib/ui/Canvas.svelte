@@ -1335,6 +1335,19 @@
     isNew: boolean;
   }>>([]);
   
+  // Output nodes rendered as DOM overlays (show generated images)
+  let outputNodes = $state<Array<{
+    id: string;
+    imageUrl: string;
+    outputPath: string;
+    screenX: number;
+    screenY: number;
+    screenWidth: number;
+    screenHeight: number;
+    borderRadius: number;
+    isNew: boolean;
+  }>>([]);
+  
   // Port overlays computed separately to avoid performance issues
   // Only show ports for hovered/selected nodes or when connecting
   
@@ -1349,6 +1362,7 @@
     if (!renderer) {
       imageNodes = [];
       modelNodes = [];
+      outputNodes = [];
       return;
     }
     
@@ -1391,6 +1405,29 @@
           modelName: node.params.modelName as string,
           modelType: node.params.modelType as string,
           modelSize: node.params.modelSize as number,
+          screenX: topLeft.x,
+          screenY: topLeft.y,
+          screenWidth: bottomRight.x - topLeft.x,
+          screenHeight: bottomRight.y - topLeft.y,
+          borderRadius: 12 * cam.zoom,
+          isNew: newlyAddedNodeIds.has(node.id),
+        };
+      });
+    
+    outputNodes = allNodes
+      .filter(node => node.type === 'output')
+      .map(node => {
+        const topLeft = renderer.worldToScreen(node.x, node.y, cam);
+        const bottomRight = renderer.worldToScreen(
+          node.x + node.width, 
+          node.y + node.height, 
+          cam
+        );
+        
+        return {
+          id: node.id,
+          imageUrl: (node.thumbnailUrl || node.params.imageUrl) as string,
+          outputPath: node.params.outputPath as string,
           screenX: topLeft.x,
           screenY: topLeft.y,
           screenWidth: bottomRight.x - topLeft.x,
@@ -1651,6 +1688,37 @@
         <span class="model-node-name">{model.modelName}</span>
         <span class="model-node-type">{model.modelType.toUpperCase()}</span>
       </div>
+    </div>
+  {/each}
+  
+  <!-- Output nodes rendered as DOM overlays (show generated images) -->
+  {#each outputNodes as output (output.id)}
+    <div
+      class="output-node-overlay"
+      class:fade-in={output.isNew}
+      class:empty={!output.imageUrl}
+      style={`left: ${output.screenX}px; top: ${output.screenY}px; width: ${output.screenWidth}px; height: ${output.screenHeight}px; border-radius: ${output.borderRadius}px;`}
+    >
+      {#if output.imageUrl}
+        <img 
+          src={output.imageUrl} 
+          alt="Generated output"
+          draggable="false"
+        />
+        <div class="output-node-badge">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 6L9 17l-5-5" />
+          </svg>
+        </div>
+      {:else}
+        <div class="output-placeholder">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M3 16l5-5 4 4 5-5 4 4" />
+          </svg>
+          <span>Output</span>
+        </div>
+      {/if}
     </div>
   {/each}
   
@@ -2016,6 +2084,82 @@
     letter-spacing: 0.05em;
     user-select: none;
     -webkit-user-select: none;
+  }
+  
+  /* Output node overlay - shows generated images */
+  .output-node-overlay {
+    position: absolute;
+    z-index: 1;
+    border-radius: 12px;
+    overflow: hidden;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 0 2px rgba(52, 211, 153, 0.5);
+    background: #1a1a1e;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  
+  .output-node-overlay img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
+    pointer-events: none;
+  }
+  
+  .output-node-overlay.empty {
+    border: 2px dashed rgba(52, 211, 153, 0.5);
+    background: rgba(52, 211, 153, 0.1);
+  }
+  
+  .output-node-badge {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    width: 24px;
+    height: 24px;
+    background: rgba(52, 211, 153, 0.9);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+  
+  .output-node-badge svg {
+    width: 14px;
+    height: 14px;
+    color: white;
+  }
+  
+  .output-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: rgba(52, 211, 153, 0.7);
+  }
+  
+  .output-placeholder svg {
+    width: 48px;
+    height: 48px;
+    opacity: 0.5;
+  }
+  
+  .output-placeholder span {
+    font-size: 12px;
+    font-weight: 500;
+    opacity: 0.7;
+  }
+  
+  .output-node-overlay.fade-in {
+    animation: node-fade-in 80ms ease-out forwards;
   }
   
   .marquee-rect {

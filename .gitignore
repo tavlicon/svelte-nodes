@@ -28,6 +28,14 @@ Thumbs.db
 .env.local
 .env.*.local
 
+# Python
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.Python
+backend/venv/
+
 # TypeScript cache
 *.tsbuildinfo
 

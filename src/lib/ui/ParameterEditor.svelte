@@ -1,65 +1,131 @@
 <script lang="ts">
   import { graphStore } from '../graph/store.svelte';
   import type { NodeInstance, NodeDefinition } from '../graph/types';
+  import type { ParameterMeta, ExtendedNodeDefinition } from '../graph/nodes/registry';
   
   interface Props {
     node: NodeInstance;
-    definition: NodeDefinition;
+    definition: ExtendedNodeDefinition;
+    filterGroup?: string;
+    excludeGroups?: string[];
   }
   
-  let { node, definition }: Props = $props();
+  let { node, definition, filterGroup, excludeGroups = [] }: Props = $props();
   
   function handleParamChange(key: string, value: unknown) {
     graphStore.updateNode(node.id, {
       params: { ...node.params, [key]: value },
     });
   }
+  
+  function getMeta(key: string): ParameterMeta | undefined {
+    return definition.parameterMeta?.[key];
+  }
+  
+  function shouldShowParam(key: string): boolean {
+    const meta = getMeta(key);
+    const group = meta?.group || 'default';
+    
+    // Hide model info params
+    if (group === 'model') return false;
+    
+    // Filter by group if specified
+    if (filterGroup && group !== filterGroup) return false;
+    
+    // Exclude specified groups
+    if (excludeGroups.includes(group)) return false;
+    
+    return true;
+  }
+  
+  function getLabel(key: string, meta?: ParameterMeta): string {
+    return meta?.label || key.replace(/_/g, ' ');
+  }
 </script>
 
 <div class="parameter-editor">
   {#each Object.entries(definition.defaultParams) as [key, defaultValue]}
-    <div class="param-row">
-      <label class="param-label" for={`param-${key}`}>
-        {key.replace(/_/g, ' ')}
-      </label>
-      
-      {#if typeof defaultValue === 'string'}
-        {#if key === 'text' || key === 'prompt'}
+    {#if shouldShowParam(key)}
+      {@const meta = getMeta(key)}
+      <div class="param-row" class:full-width={meta?.type === 'textarea'}>
+        <label class="param-label" for={`param-${key}`}>
+          {getLabel(key, meta)}
+        </label>
+        
+        {#if meta?.type === 'textarea'}
           <textarea
             id={`param-${key}`}
             class="param-textarea"
             value={node.params[key] as string ?? defaultValue}
             oninput={(e) => handleParamChange(key, e.currentTarget.value)}
-            placeholder={`Enter ${key}...`}
+            placeholder={meta.placeholder || `Enter ${key}...`}
           ></textarea>
-        {:else}
+        {:else if meta?.type === 'select'}
+          <select
+            id={`param-${key}`}
+            class="param-select"
+            value={node.params[key] as string ?? defaultValue}
+            onchange={(e) => handleParamChange(key, e.currentTarget.value)}
+          >
+            {#each meta.options || [] as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        {:else if meta?.type === 'slider'}
+          <div class="slider-container">
+            <input
+              id={`param-${key}`}
+              type="range"
+              class="param-slider"
+              min={meta.min ?? 0}
+              max={meta.max ?? 100}
+              step={meta.step ?? 1}
+              value={node.params[key] as number ?? defaultValue}
+              oninput={(e) => handleParamChange(key, parseFloat(e.currentTarget.value))}
+            />
+            <span class="slider-value">{node.params[key] ?? defaultValue}</span>
+          </div>
+        {:else if typeof defaultValue === 'string'}
+          {#if key === 'text' || key === 'prompt' || key.includes('prompt')}
+            <textarea
+              id={`param-${key}`}
+              class="param-textarea"
+              value={node.params[key] as string ?? defaultValue}
+              oninput={(e) => handleParamChange(key, e.currentTarget.value)}
+              placeholder={`Enter ${key}...`}
+            ></textarea>
+          {:else}
+            <input
+              id={`param-${key}`}
+              type="text"
+              class="param-input"
+              value={node.params[key] as string ?? defaultValue}
+              oninput={(e) => handleParamChange(key, e.currentTarget.value)}
+            />
+          {/if}
+        {:else if typeof defaultValue === 'number'}
           <input
             id={`param-${key}`}
-            type="text"
+            type="number"
             class="param-input"
-            value={node.params[key] as string ?? defaultValue}
-            oninput={(e) => handleParamChange(key, e.currentTarget.value)}
+            value={node.params[key] as number ?? defaultValue}
+            oninput={(e) => handleParamChange(key, parseFloat(e.currentTarget.value) || 0)}
+            min={meta?.min}
+            max={meta?.max}
+            step={meta?.step}
           />
+        {:else if typeof defaultValue === 'boolean'}
+          <label class="param-toggle">
+            <input
+              type="checkbox"
+              checked={node.params[key] as boolean ?? defaultValue}
+              onchange={(e) => handleParamChange(key, e.currentTarget.checked)}
+            />
+            <span class="toggle-slider"></span>
+          </label>
         {/if}
-      {:else if typeof defaultValue === 'number'}
-        <input
-          id={`param-${key}`}
-          type="number"
-          class="param-input"
-          value={node.params[key] as number ?? defaultValue}
-          oninput={(e) => handleParamChange(key, parseFloat(e.currentTarget.value) || 0)}
-        />
-      {:else if typeof defaultValue === 'boolean'}
-        <label class="param-toggle">
-          <input
-            type="checkbox"
-            checked={node.params[key] as boolean ?? defaultValue}
-            onchange={(e) => handleParamChange(key, e.currentTarget.checked)}
-          />
-          <span class="toggle-slider"></span>
-        </label>
-      {/if}
-    </div>
+      </div>
+    {/if}
   {/each}
 </div>
 
@@ -76,6 +142,10 @@
     gap: 6px;
   }
   
+  .param-row.full-width {
+    width: 100%;
+  }
+  
   .param-label {
     font-size: 12px;
     font-weight: 500;
@@ -84,7 +154,8 @@
   }
   
   .param-input,
-  .param-textarea {
+  .param-textarea,
+  .param-select {
     width: 100%;
     padding: 10px 12px;
     background: var(--bg-tertiary);
@@ -97,7 +168,8 @@
   }
   
   .param-input:focus,
-  .param-textarea:focus {
+  .param-textarea:focus,
+  .param-select:focus {
     outline: none;
     border-color: var(--accent-primary);
   }
@@ -106,6 +178,76 @@
     min-height: 80px;
     resize: vertical;
     font-family: var(--font-mono);
+  }
+  
+  .param-select {
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 36px;
+  }
+  
+  .param-select option {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+  }
+  
+  /* Slider styles */
+  .slider-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  
+  .param-slider {
+    flex: 1;
+    height: 6px;
+    appearance: none;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    cursor: pointer;
+  }
+  
+  .param-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    cursor: grab;
+    transition: transform 0.1s ease, box-shadow 0.1s ease;
+  }
+  
+  .param-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.1);
+    box-shadow: 0 0 8px var(--accent-glow);
+  }
+  
+  .param-slider::-webkit-slider-thumb:active {
+    cursor: grabbing;
+    transform: scale(0.95);
+  }
+  
+  .param-slider::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    background: var(--accent-primary);
+    border: none;
+    border-radius: 50%;
+    cursor: grab;
+  }
+  
+  .slider-value {
+    min-width: 48px;
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-family: var(--font-mono);
+    text-align: center;
+    color: var(--text-primary);
   }
   
   .param-toggle {

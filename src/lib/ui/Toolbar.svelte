@@ -2,9 +2,56 @@
   import { graphStore } from '../graph/store.svelte';
   import { nodeRegistry } from '../graph/nodes/registry';
   import { theme } from './theme.svelte';
+  import { inferenceManager } from '../inference/manager';
+  import { executionEngine } from '../graph/execution';
   
   let showNodeMenu = $state(false);
   let showZoomMenu = $state(false);
+  
+  // Backend status
+  let backendStatus = $state<{
+    available: boolean;
+    modelLoaded: boolean;
+    device: string;
+  }>({
+    available: false,
+    modelLoaded: false,
+    device: 'checking...',
+  });
+  
+  let isExecuting = $state(false);
+  
+  // Check backend status on mount
+  $effect(() => {
+    checkBackendStatus();
+  });
+  
+  async function checkBackendStatus() {
+    try {
+      const status = await inferenceManager.checkBackendStatus();
+      backendStatus = {
+        available: inferenceManager.isBackendAvailable(),
+        modelLoaded: status.modelLoaded,
+        device: status.device || 'simulation',
+      };
+    } catch (e) {
+      backendStatus = {
+        available: false,
+        modelLoaded: false,
+        device: 'offline',
+      };
+    }
+  }
+  
+  async function handleRunGraph() {
+    if (isExecuting) return;
+    isExecuting = true;
+    try {
+      await executionEngine.execute();
+    } finally {
+      isExecuting = false;
+    }
+  }
   
   function handleAddNode(type: string) {
     // Add node at center of viewport with offset based on existing nodes
@@ -157,9 +204,49 @@
       Redo
       <span class="shortcut">⇧⌘Z</span>
     </button>
+    
+    <div class="separator"></div>
+    
+    <button 
+      class="toolbar-btn run-btn"
+      onclick={handleRunGraph}
+      disabled={isExecuting || graphStore.nodes.size === 0}
+      title="Run the graph"
+    >
+      {#if isExecuting}
+        <span class="spinner"></span>
+        Running...
+      {:else}
+        <span class="icon">▶</span>
+        Run
+      {/if}
+    </button>
   </div>
   
   <div class="toolbar-section view">
+    <!-- Backend Status Indicator -->
+    <div 
+      class="backend-status" 
+      class:connected={backendStatus.available && backendStatus.modelLoaded}
+      class:loading={backendStatus.available && !backendStatus.modelLoaded}
+      title={backendStatus.available 
+        ? `Backend: ${backendStatus.device} | Model: ${backendStatus.modelLoaded ? 'loaded' : 'loading...'}` 
+        : 'Backend offline - using simulation mode'}
+    >
+      <span class="status-dot"></span>
+      <span class="status-text">
+        {#if backendStatus.available && backendStatus.modelLoaded}
+          {backendStatus.device.toUpperCase()}
+        {:else if backendStatus.available}
+          Loading...
+        {:else}
+          Simulation
+        {/if}
+      </span>
+    </div>
+    
+    <div class="separator"></div>
+    
     <div class="dropdown">
       <button 
         class="toolbar-btn zoom-btn"
@@ -386,5 +473,81 @@
     font-size: 12px;
     color: var(--text-muted);
     font-family: system-ui, -apple-system, sans-serif;
+  }
+  
+  /* Run button */
+  .run-btn {
+    background: #10b981;
+    border-color: #10b981;
+    color: white;
+  }
+  
+  .run-btn:hover:not(:disabled) {
+    background: #059669;
+    border-color: #059669;
+  }
+  
+  .run-btn:disabled {
+    background: var(--bg-tertiary);
+    border-color: var(--border-subtle);
+    color: var(--text-muted);
+  }
+  
+  .spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  
+  /* Backend status indicator */
+  .backend-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
+  }
+  
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #f59e0b;
+  }
+  
+  .backend-status.connected .status-dot {
+    background: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.5);
+  }
+  
+  .backend-status.loading .status-dot {
+    background: #3b82f6;
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+  }
+  
+  .status-text {
+    color: var(--text-secondary);
+  }
+  
+  .backend-status.connected .status-text {
+    color: #10b981;
   }
 </style>

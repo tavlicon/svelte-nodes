@@ -1,0 +1,15 @@
+# Stable Diffusion inference backend
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+python-multipart==0.0.6
+pillow==10.2.0
+torch>=2.1.0
+torchvision>=0.16.0
+diffusers>=0.25.0
+transformers>=4.36.0
+accelerate>=0.25.0
+safetensors>=0.4.0
+numpy>=1.24.0
+sse-starlette==1.8.2
+aiofiles==23.2.1
+certifi>=2023.0.0

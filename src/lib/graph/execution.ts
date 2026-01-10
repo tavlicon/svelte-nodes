@@ -6,7 +6,7 @@
 import type { NodeInstance, Edge } from './types';
 import { graphStore } from './store.svelte';
 import { nodeRegistry } from './nodes/registry';
-import { inferenceManager } from '../inference/manager';
+import { inferenceManager, type Img2ImgRequest } from '../inference/manager';
 
 export type ExecutionStatus = 'idle' | 'pending' | 'running' | 'complete' | 'error';
 
@@ -171,9 +171,33 @@ class ExecutionEngine {
           outputs = await this.executeSDXLTurbo(node, inputs);
           break;
           
+        case 'model':
+          outputs = await this.executeImg2Img(node, inputs);
+          break;
+          
+        case 'image':
+          // Image node outputs its image URL
+          outputs = { image: node.params.imageUrl || '' };
+          break;
+          
         case 'image-display':
           // Just pass through the image
           outputs = { image: inputs.image };
+          break;
+          
+        case 'output':
+          // Output node receives the image and displays it
+          // Update thumbnail with the received image
+          if (inputs.image) {
+            graphStore.updateNode(nodeId, {
+              thumbnailUrl: inputs.image as string,
+              params: {
+                ...node.params,
+                imageUrl: inputs.image as string,
+              },
+            });
+          }
+          outputs = {};
           break;
           
         default:
@@ -249,6 +273,128 @@ class ExecutionEngine {
     }
     
     return { image: result.imageData };
+  }
+  
+  /**
+   * Execute img2img model node (SD 1.5 style)
+   */
+  private async executeImg2Img(
+    node: NodeInstance,
+    inputs: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    // Get input image (from connected image node)
+    const inputImage = inputs.image as string | undefined;
+    
+    if (!inputImage) {
+      throw new Error('No input image connected');
+    }
+    
+    // Get prompts from node params
+    const positivePrompt = (node.params.positive_prompt as string) || '';
+    const negativePrompt = (node.params.negative_prompt as string) || '';
+    
+    if (!positivePrompt) {
+      throw new Error('No positive prompt provided');
+    }
+    
+    // Build img2img request with KSampler params
+    const request: Img2ImgRequest = {
+      inputImage,
+      positivePrompt,
+      negativePrompt,
+      // KSampler parameters
+      seed: (node.params.seed as number) ?? 42,
+      steps: (node.params.steps as number) ?? 3,
+      cfg: (node.params.cfg as number) ?? 2.0,
+      samplerName: (node.params.sampler_name as string) ?? 'lcm',
+      scheduler: (node.params.scheduler as string) ?? 'normal',
+      denoise: (node.params.denoise as number) ?? 0.75,
+      // Model info
+      modelPath: (node.params.modelPath as string) || '',
+    };
+    
+    // Run img2img inference
+    const result = await inferenceManager.runImg2Img(request, (progress) => {
+      // Update node status with progress
+      console.log(`Img2Img progress: step ${progress.step}/${progress.totalSteps}`);
+    });
+    
+    // Handle seed control after generate
+    const controlAfterGenerate = node.params.control_after_generate as string;
+    if (controlAfterGenerate !== 'fixed') {
+      let newSeed = node.params.seed as number;
+      switch (controlAfterGenerate) {
+        case 'increment':
+          newSeed += 1;
+          break;
+        case 'decrement':
+          newSeed -= 1;
+          break;
+        case 'randomize':
+          newSeed = Math.floor(Math.random() * 2147483647);
+          break;
+      }
+      graphStore.updateNode(node.id, {
+        params: { ...node.params, seed: newSeed },
+      });
+    }
+    
+    // Update thumbnail
+    if (result.imageUrl) {
+      graphStore.updateNode(node.id, { thumbnailUrl: result.imageUrl });
+    }
+    
+    // Create or update output node
+    this.createOrUpdateOutputNode(node, result);
+    
+    return { image: result.imageUrl || result.imageData };
+  }
+  
+  /**
+   * Create or update an output node connected to a model node
+   */
+  private createOrUpdateOutputNode(
+    modelNode: NodeInstance,
+    result: { imageUrl: string | null; outputPath?: string; timeTaken: number }
+  ) {
+    // Look for existing output node connected to this model
+    const existingOutputEdge = Array.from(graphStore.edges.values()).find(
+      edge => edge.sourceNodeId === modelNode.id && 
+              graphStore.getNodeById(edge.targetNodeId)?.type === 'output'
+    );
+    
+    if (existingOutputEdge) {
+      // Update existing output node
+      const outputNodeId = existingOutputEdge.targetNodeId;
+      graphStore.updateNode(outputNodeId, {
+        thumbnailUrl: result.imageUrl || '',
+        params: {
+          imageUrl: result.imageUrl || '',
+          outputPath: result.outputPath || '',
+          timeTaken: Math.round(result.timeTaken),
+        },
+      });
+    } else {
+      // Create new output node positioned to the right of the model node
+      const outputNodeId = graphStore.addNode('output', modelNode.x + 250, modelNode.y, {
+        imageUrl: result.imageUrl || '',
+        outputPath: result.outputPath || '',
+        timeTaken: Math.round(result.timeTaken),
+      });
+      
+      // Set thumbnail
+      graphStore.updateNode(outputNodeId, {
+        thumbnailUrl: result.imageUrl || '',
+      });
+      
+      // Connect model output to output node input
+      graphStore.addEdge(
+        modelNode.id,
+        'image',
+        outputNodeId,
+        'image'
+      );
+    }
   }
   
   /**

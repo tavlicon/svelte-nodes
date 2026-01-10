@@ -11,6 +11,7 @@ import {
   type CanvasState,
   generateId 
 } from './types';
+import { nodeRegistry } from './nodes/registry';
 
 // Create Yjs document for CRDT support
 const ydoc = new Y.Doc();
@@ -207,6 +208,11 @@ function addNode(
   customHeight?: number
 ): string {
   const id = generateId();
+  
+  // Get default params from registry and merge with provided params
+  const defaultParams = nodeRegistry[type]?.defaultParams ?? {};
+  const mergedParams = { ...defaultParams, ...params };
+  
   const node: NodeInstance = {
     id,
     type,
@@ -214,7 +220,7 @@ function addNode(
     y,
     width: customWidth ?? NODE_SIZE,
     height: customHeight ?? NODE_SIZE,
-    params,
+    params: mergedParams,
     status: 'idle',
   };
   

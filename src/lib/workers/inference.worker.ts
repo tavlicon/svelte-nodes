@@ -18,6 +18,20 @@ interface InferenceRequest {
   seed: number;
 }
 
+interface Img2ImgRequest {
+  type: 'img2img';
+  inputImage: string;
+  positivePrompt: string;
+  negativePrompt?: string;
+  seed: number;
+  steps: number;
+  cfg: number;
+  samplerName: string;
+  scheduler: string;
+  denoise: number;
+  modelPath?: string;
+}
+
 let session: ort.InferenceSession | null = null;
 let textEncoderSession: ort.InferenceSession | null = null;
 let vaeDecoderSession: ort.InferenceSession | null = null;
@@ -196,6 +210,147 @@ async function runInference(request: InferenceRequest) {
   }
 }
 
+/**
+ * Run img2img pipeline
+ * This simulates the ComfyUI flow:
+ * Load Image → VAE Encode → KSampler → VAE Decode → Save Image
+ */
+async function runImg2Img(request: Img2ImgRequest) {
+  const startTime = performance.now();
+  
+  try {
+    const { inputImage, positivePrompt, negativePrompt, seed, steps, cfg, samplerName, scheduler, denoise } = request;
+    
+    console.log(`Running img2img: "${positivePrompt}" | sampler: ${samplerName} | scheduler: ${scheduler} | steps: ${steps} | cfg: ${cfg} | denoise: ${denoise}`);
+    
+    // Load the input image
+    const img = await loadImageFromUrl(inputImage);
+    const { width, height } = img;
+    
+    // Simulate the pipeline stages
+    // Stage 1: VAE Encode (image to latent)
+    self.postMessage({
+      type: 'inference-progress',
+      payload: { step: 0, totalSteps: steps, stage: 'VAE Encode' },
+    });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Stage 2: KSampler (diffusion process)
+    for (let step = 1; step <= steps; step++) {
+      self.postMessage({
+        type: 'inference-progress',
+        payload: { step, totalSteps: steps, stage: 'KSampler' },
+      });
+      
+      // Simulate processing time per step based on sampler
+      const stepTime = samplerName === 'lcm' ? 100 : 200;
+      await new Promise(resolve => setTimeout(resolve, stepTime));
+    }
+    
+    // Stage 3: VAE Decode (latent to image)
+    self.postMessage({
+      type: 'inference-progress',
+      payload: { step: steps, totalSteps: steps, stage: 'VAE Decode' },
+    });
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Generate transformed image (placeholder - in production this would be actual inference)
+    const imageData = await transformImage(img, {
+      positivePrompt,
+      negativePrompt,
+      seed,
+      denoise,
+      cfg,
+    });
+    
+    // Convert to blob
+    const canvas = new OffscreenCanvas(width, height);
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('Failed to get canvas context');
+    ctx.putImageData(imageData, 0, 0);
+    
+    const blob = await canvas.convertToBlob({ type: 'image/png' });
+    const imageUrl = URL.createObjectURL(blob);
+    
+    const timeTaken = performance.now() - startTime;
+    
+    self.postMessage({
+      type: 'inference-complete',
+      payload: {
+        imageData,
+        imageUrl,
+        timeTaken,
+      },
+    });
+  } catch (error) {
+    self.postMessage({
+      type: 'inference-error',
+      payload: { error: error instanceof Error ? error.message : String(error) },
+    });
+  }
+}
+
+/**
+ * Load image from URL and return ImageBitmap
+ */
+async function loadImageFromUrl(url: string): Promise<ImageBitmap> {
+  const response = await fetch(url);
+  const blob = await response.blob();
+  return createImageBitmap(blob);
+}
+
+/**
+ * Transform image based on prompts (placeholder implementation)
+ * In production, this would apply the actual diffusion process
+ */
+async function transformImage(
+  img: ImageBitmap,
+  params: {
+    positivePrompt: string;
+    negativePrompt?: string;
+    seed: number;
+    denoise: number;
+    cfg: number;
+  }
+): Promise<ImageData> {
+  const { width, height } = img;
+  const { positivePrompt, seed, denoise, cfg } = params;
+  
+  // Create canvas and draw original image
+  const canvas = new OffscreenCanvas(width, height);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) throw new Error('Failed to get canvas context');
+  
+  ctx.drawImage(img, 0, 0);
+  const imageData = ctx.getImageData(0, 0, width, height);
+  const data = imageData.data;
+  
+  // Create a transformation based on prompt hash
+  let hash = seed;
+  for (let i = 0; i < positivePrompt.length; i++) {
+    hash = ((hash << 5) - hash) + positivePrompt.charCodeAt(i);
+    hash = hash & hash;
+  }
+  
+  // Apply transformation based on denoise strength
+  const tintR = Math.abs(hash % 60) - 30;
+  const tintG = Math.abs((hash >> 8) % 60) - 30;
+  const tintB = Math.abs((hash >> 16) % 60) - 30;
+  const contrast = 1 + (cfg / 20) * 0.2;
+  
+  for (let i = 0; i < data.length; i += 4) {
+    // Apply denoise-weighted transformation
+    const strength = denoise;
+    
+    // Adjust contrast
+    data[i] = Math.min(255, Math.max(0, ((data[i] - 128) * contrast + 128) * (1 - strength * 0.1) + tintR * strength));
+    data[i + 1] = Math.min(255, Math.max(0, ((data[i + 1] - 128) * contrast + 128) * (1 - strength * 0.1) + tintG * strength));
+    data[i + 2] = Math.min(255, Math.max(0, ((data[i + 2] - 128) * contrast + 128) * (1 - strength * 0.1) + tintB * strength));
+  }
+  
+  return imageData;
+}
+
 // Message handler
 self.onmessage = async (e: MessageEvent) => {
   const { type, payload } = e.data;
@@ -206,7 +361,12 @@ self.onmessage = async (e: MessageEvent) => {
       break;
       
     case 'run-inference':
-      await runInference(payload);
+      // Check if this is an img2img request
+      if (payload.type === 'img2img') {
+        await runImg2Img(payload as Img2ImgRequest);
+      } else {
+        await runInference(payload);
+      }
       break;
   }
 };
