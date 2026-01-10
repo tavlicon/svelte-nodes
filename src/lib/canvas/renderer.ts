@@ -444,21 +444,21 @@ export class CanvasRenderer {
     const w = this.width * dpr;
     const h = this.height * dpr;
     
-    // Create view-projection matrix
-    // Scale by zoom * dpr to match Canvas2D renderer behavior
-    // This ensures world units map to the same CSS pixels in both renderers
+    // Create view-projection matrix (top-left anchored)
+    // Maps world coordinates so that camera position appears at top-left of screen
     const effectiveZoom = camera.zoom * dpr;
     const scaleX = (2 * effectiveZoom) / w;
     const scaleY = (2 * effectiveZoom) / h;
-    const translateX = camera.x * scaleX;
-    const translateY = camera.y * scaleY;
+    // Offset by -1 for X and +1 for Y to anchor to top-left instead of center
+    const translateX = camera.x * scaleX - 1;
+    const translateY = -camera.y * scaleY + 1;
     
     // Column-major 4x4 matrix
     const matrix = new Float32Array([
       scaleX, 0, 0, 0,
       0, -scaleY, 0, 0, // Flip Y for canvas coordinates
       0, 0, 1, 0,
-      translateX, -translateY, 0, 1,
+      translateX, translateY, 0, 1,
     ]);
     
     // Viewport data
@@ -605,13 +605,8 @@ export class CanvasRenderer {
     pass.setVertexBuffer(0, this.quadBuffer!);
     pass.draw(6, 1); // Single full-screen quad
     
-    // Draw wires (behind nodes)
-    if (wireCount > 0) {
-      pass.setPipeline(this.wirePipeline);
-      pass.setBindGroup(0, this.wireBindGroup!);
-      pass.setVertexBuffer(0, this.quadBuffer!);
-      pass.draw(6, wireCount);
-    }
+    // Wires are now rendered as SVG overlay in Canvas.svelte for reliability
+    // (prevents coordinate misalignment and ghost rendering on resize)
     
     // Draw nodes
     if (nodeCount > 0) {
@@ -668,12 +663,11 @@ export class CanvasRenderer {
   }
   
   // Convert world coordinates to screen (CSS) coordinates
-  // Matches the WebGPU shader transform which uses effectiveZoom = zoom * dpr
-  // CSS position = (world + camera) * zoom + width / 2
+  // Top-left anchored: no center offset for stable positions on resize
   worldToScreen(worldX: number, worldY: number, camera: Camera): { x: number; y: number } {
     return {
-      x: (worldX + camera.x) * camera.zoom + this.width / 2,
-      y: (worldY + camera.y) * camera.zoom + this.height / 2,
+      x: (worldX + camera.x) * camera.zoom,
+      y: (worldY + camera.y) * camera.zoom,
     };
   }
   

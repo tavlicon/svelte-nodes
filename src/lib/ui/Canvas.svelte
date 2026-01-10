@@ -245,41 +245,39 @@
     renderer.resize(width, height);
   }
   
-  // Convert screen to world coordinates
-  // Pass explicit width/height for consistency when available
-  // Falls back to renderer's viewport size, then to state variables
-  function screenToWorld(screenX: number, screenY: number, width?: number, height?: number) {
+  // Convert screen to world coordinates (top-left anchored)
+  // This ensures nodes maintain their screen position on resize
+  function screenToWorld(screenX: number, screenY: number) {
     const cam = graphStore.camera;
-    // Use explicit dimensions, or renderer's viewport, or state variables
-    const viewport = renderer?.getViewportSize();
-    const w = width ?? viewport?.width ?? canvasWidth;
-    const h = height ?? viewport?.height ?? canvasHeight;
-    const worldX = (screenX - w / 2) / cam.zoom - cam.x;
-    const worldY = (screenY - h / 2) / cam.zoom - cam.y;
+    const worldX = screenX / cam.zoom - cam.x;
+    const worldY = screenY / cam.zoom - cam.y;
     return { x: worldX, y: worldY };
   }
 
-  function worldToScreen(worldX: number, worldY: number, width?: number, height?: number) {
+  // Convert world to screen coordinates (top-left anchored)
+  function worldToScreen(worldX: number, worldY: number) {
     const cam = graphStore.camera;
-    // Use explicit dimensions, or renderer's viewport, or state variables
-    const viewport = renderer?.getViewportSize();
-    const w = width ?? viewport?.width ?? canvasWidth;
-    const h = height ?? viewport?.height ?? canvasHeight;
     return {
-      x: (worldX + cam.x) * cam.zoom + w / 2,
-      y: (worldY + cam.y) * cam.zoom + h / 2,
+      x: (worldX + cam.x) * cam.zoom,
+      y: (worldY + cam.y) * cam.zoom,
     };
   }
   
-  // Zoom to fit all nodes in view
+  // Zoom to fit all nodes in view (top-left anchored)
   function zoomToFit() {
     const nodes = Array.from(graphStore.nodes.values());
     if (nodes.length === 0) {
-      // No nodes, reset to default view
-      graphStore.setCamera({ x: 0, y: 0, zoom: 1 });
+      // No nodes, reset to default view with some offset so origin isn't at corner
+      graphStore.setCamera({ x: 100, y: 100, zoom: 1 });
       return;
     }
     
+    // Get viewport dimensions - use renderer's actual size if available
+    const viewport = renderer?.getViewportSize();
+    const viewportWidth = viewport?.width || canvasWidth || 1000;
+    const viewportHeight = viewport?.height || canvasHeight || 600;
+    
+    // Calculate bounding box of all nodes
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     nodes.forEach(node => {
       minX = Math.min(minX, node.x);
@@ -288,33 +286,32 @@
       maxY = Math.max(maxY, node.y + node.height);
     });
     
-    // Add padding
-    const padding = 100;
-    minX -= padding;
-    minY -= padding;
-    maxX += padding;
-    maxY += padding;
+    // Add generous padding around content
+    const padding = 80;
+    const contentWidth = (maxX - minX) + padding * 2;
+    const contentHeight = (maxY - minY) + padding * 2;
     
-    // Calculate center and zoom
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-    const contentWidth = maxX - minX;
-    const contentHeight = maxY - minY;
-    
-    // Use canvas dimensions
-    const viewportWidth = canvasWidth || 1000;
-    const viewportHeight = canvasHeight || 600;
-    
+    // Calculate zoom to fit content (cap between 0.1 and 1.5 for comfortable viewing)
     const zoomX = viewportWidth / contentWidth;
     const zoomY = viewportHeight / contentHeight;
-    const zoom = Math.min(zoomX, zoomY, 2); // Cap at 2x zoom
+    const finalZoom = Math.max(0.1, Math.min(zoomX, zoomY, 1.5));
     
-    graphStore.setCamera({ x: -centerX, y: -centerY, zoom: Math.max(0.1, zoom) });
+    // For top-left anchored coordinates: screenX = (worldX + camX) * zoom
+    // To center content: the content's center should appear at viewport center
+    // Content center = (minX + maxX) / 2, (minY + maxY) / 2
+    // We want: (contentCenterX + camX) * zoom = viewportWidth / 2
+    // Solving: camX = viewportWidth / (2 * zoom) - contentCenterX
+    const contentCenterX = (minX + maxX) / 2;
+    const contentCenterY = (minY + maxY) / 2;
+    const camX = viewportWidth / (2 * finalZoom) - contentCenterX;
+    const camY = viewportHeight / (2 * finalZoom) - contentCenterY;
+    
+    graphStore.setCamera({ x: camX, y: camY, zoom: finalZoom });
   }
   
   // Hit test nodes (returns topmost hit)
-  function hitTestNode(screenX: number, screenY: number, viewWidth?: number, viewHeight?: number): string | null {
-    const world = screenToWorld(screenX, screenY, viewWidth, viewHeight);
+  function hitTestNode(screenX: number, screenY: number): string | null {
+    const world = screenToWorld(screenX, screenY);
     
     // Test in reverse order (top-most first)
     const nodeArray = Array.from(graphStore.nodes.values()).reverse();
@@ -543,7 +540,7 @@
     }
     
     // Single click: select or drag
-    const hitNodeId = hitTestNode(screenX, screenY, viewWidth, viewHeight);
+    const hitNodeId = hitTestNode(screenX, screenY);
     
     if (hitNodeId) {
       // Shift-click: toggle selection
@@ -908,8 +905,6 @@
     const rect = canvasElement.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
     const mouseY = e.clientY - rect.top;
-    const width = rect.width;
-    const height = rect.height;
     
     // Trackpad pan (no ctrl, has deltaX)
     if (!e.ctrlKey && Math.abs(e.deltaX) > 0) {
@@ -926,16 +921,21 @@
     const zoomFactor = Math.exp(zoomDelta);
     const newZoom = Math.max(0.1, Math.min(5, graphStore.camera.zoom * zoomFactor));
     
-    // Zoom towards mouse
+    // Zoom towards mouse (top-left anchored)
+    // The point under the mouse should stay fixed during zoom
     const cam = graphStore.camera;
-    const worldXBefore = (mouseX - width / 2) / cam.zoom - cam.x;
-    const worldYBefore = (mouseY - height / 2) / cam.zoom - cam.y;
-    const worldXAfter = (mouseX - width / 2) / newZoom - cam.x;
-    const worldYAfter = (mouseY - height / 2) / newZoom - cam.y;
+    // World position under mouse before zoom
+    const worldXBefore = mouseX / cam.zoom - cam.x;
+    const worldYBefore = mouseY / cam.zoom - cam.y;
+    // After zoom, we want the same world position under mouse
+    // mouseX = (worldX + newCamX) * newZoom
+    // newCamX = mouseX / newZoom - worldX
+    const newCamX = mouseX / newZoom - worldXBefore;
+    const newCamY = mouseY / newZoom - worldYBefore;
     
     graphStore.setCamera({
-      x: cam.x + (worldXAfter - worldXBefore),
-      y: cam.y + (worldYAfter - worldYBefore),
+      x: newCamX,
+      y: newCamY,
       zoom: newZoom,
     });
   }
@@ -958,7 +958,7 @@
     const world = screenToWorld(screenX, screenY, rect.width, rect.height);
     
     // Check for node hover first
-    const hitNodeId = hitTestNode(screenX, screenY, rect.width, rect.height);
+    const hitNodeId = hitTestNode(screenX, screenY);
     hoveredNodeId = hitNodeId;
     
     // Check for edge hover if no node hit
@@ -1194,6 +1194,8 @@
   // Uses renderer's worldToScreen to ensure consistency with rendered node positions
   let selectionBounds = $derived.by(() => {
     if (graphStore.selectedNodeIds.size === 0 || !renderer) return null;
+    // Track viewport for reactivity (needed because renderer.resize() doesn't change reference)
+    void canvasWidth; void canvasHeight;
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
@@ -1226,6 +1228,8 @@
   // Screen-space bounds for hovered node (only if not already selected)
   let hoverBounds = $derived.by(() => {
     if (!hoveredNodeId || !renderer) return null;
+    // Track viewport for reactivity (needed because renderer.resize() doesn't change reference)
+    void canvasWidth; void canvasHeight;
     // Don't show hover frame if node is already selected
     if (graphStore.selectedNodeIds.has(hoveredNodeId)) return null;
     
@@ -1256,6 +1260,7 @@
     screenY: number;
     screenWidth: number;
     screenHeight: number;
+    borderRadius: number;
     isNew: boolean;
   }>>([]);
   
@@ -1269,6 +1274,7 @@
     screenY: number;
     screenWidth: number;
     screenHeight: number;
+    borderRadius: number;
     isNew: boolean;
   }>>([]);
   
@@ -1280,6 +1286,8 @@
     // Read version to track changes - must be called before any early returns
     const version = getNodesVersion();
     const cam = graphStore.camera;
+    // Track viewport for reactivity (needed because renderer.resize() doesn't change reference)
+    void canvasWidth; void canvasHeight;
     
     if (!renderer) {
       imageNodes = [];
@@ -1306,6 +1314,7 @@
           screenY: topLeft.y,
           screenWidth: bottomRight.x - topLeft.x,
           screenHeight: bottomRight.y - topLeft.y,
+          borderRadius: 12 * cam.zoom,
           isNew: newlyAddedNodeIds.has(node.id),
         };
       });
@@ -1329,6 +1338,7 @@
           screenY: topLeft.y,
           screenWidth: bottomRight.x - topLeft.x,
           screenHeight: bottomRight.y - topLeft.y,
+          borderRadius: 12 * cam.zoom,
           isNew: newlyAddedNodeIds.has(node.id),
         };
       });
@@ -1337,6 +1347,8 @@
   // Port overlays computed as derived - only for hovered/selected nodes
   let portOverlays = $derived.by(() => {
     if (!renderer) return [];
+    // Track viewport for reactivity
+    void canvasWidth; void canvasHeight;
     
     const cam = graphStore.camera;
     const selectedIds = graphStore.selectedNodeIds;
@@ -1379,6 +1391,8 @@
   // Edge paths for SVG rendering (computed as derived to avoid per-frame recalculation)
   let edgePaths = $derived.by(() => {
     if (!renderer) return [];
+    // Track viewport for reactivity
+    void canvasWidth; void canvasHeight;
     
     const cam = graphStore.camera;
     const edges = graphStore.edges;
@@ -1427,6 +1441,8 @@
   // Pending connection path computed as derived
   let pendingConnectionPath = $derived.by(() => {
     if (!renderer) return null;
+    // Track viewport for reactivity
+    void canvasWidth; void canvasHeight;
     
     const cam = graphStore.camera;
     let startScreen: { x: number; y: number };
@@ -1539,7 +1555,7 @@
       class="image-node-overlay"
       class:fade-in={img.isNew}
       class:empty={!img.imageUrl}
-      style={`left: ${img.screenX}px; top: ${img.screenY}px; width: ${img.screenWidth}px; height: ${img.screenHeight}px;`}
+      style={`left: ${img.screenX}px; top: ${img.screenY}px; width: ${img.screenWidth}px; height: ${img.screenHeight}px; border-radius: ${img.borderRadius}px;`}
     >
       {#if img.imageUrl}
         <img 
@@ -1565,7 +1581,7 @@
     <div
       class="model-node-overlay"
       class:fade-in={model.isNew}
-      style={`left: ${model.screenX}px; top: ${model.screenY}px; width: ${model.screenWidth}px; height: ${model.screenHeight}px;`}
+      style={`left: ${model.screenX}px; top: ${model.screenY}px; width: ${model.screenWidth}px; height: ${model.screenHeight}px; border-radius: ${model.borderRadius}px;`}
     >
       <div class="model-node-icon">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -1837,6 +1853,8 @@
     pointer-events: none;
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
     background: #1a1a1e;
+    user-select: none;
+    -webkit-user-select: none;
   }
   
   .image-node-overlay img {
@@ -1844,6 +1862,10 @@
     height: 100%;
     object-fit: cover;
     display: block;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
+    pointer-events: none;
   }
   
   .image-node-overlay.empty {
@@ -1904,6 +1926,8 @@
     justify-content: center;
     padding: 12px;
     gap: 8px;
+    user-select: none;
+    -webkit-user-select: none;
   }
   
   .model-node-icon {
@@ -1940,6 +1964,8 @@
     text-overflow: ellipsis;
     white-space: nowrap;
     max-width: 100%;
+    user-select: none;
+    -webkit-user-select: none;
   }
   
   .model-node-type {
@@ -1950,6 +1976,8 @@
     padding: 2px 6px;
     border-radius: 4px;
     letter-spacing: 0.05em;
+    user-select: none;
+    -webkit-user-select: none;
   }
   
   .marquee-rect {

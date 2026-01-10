@@ -134,9 +134,8 @@ export class Canvas2DRenderer {
     ctx.fillStyle = this.theme.bgPrimary;
     ctx.fillRect(0, 0, w, h);
     
-    // Save state and apply camera transform
+    // Save state and apply camera transform (top-left anchored)
     ctx.save();
-    ctx.translate(w / 2, h / 2);
     ctx.scale(camera.zoom * this.dpr, camera.zoom * this.dpr);
     ctx.translate(camera.x, camera.y);
     
@@ -183,38 +182,27 @@ export class Canvas2DRenderer {
       spacing = 20;
     }
     
-    // Calculate visible area in world coordinates
+    // Calculate visible area in world coordinates (top-left anchored)
     const viewportW = this.width / camera.zoom;
     const viewportH = this.height / camera.zoom;
-    const startX = Math.floor((-camera.x - viewportW / 2) / spacing) * spacing;
-    const endX = Math.ceil((-camera.x + viewportW / 2) / spacing) * spacing;
-    const startY = Math.floor((-camera.y - viewportH / 2) / spacing) * spacing;
-    const endY = Math.ceil((-camera.y + viewportH / 2) / spacing) * spacing;
+    const startX = Math.floor(-camera.x / spacing) * spacing;
+    const endX = Math.ceil((-camera.x + viewportW) / spacing) * spacing;
+    const startY = Math.floor(-camera.y / spacing) * spacing;
+    const endY = Math.ceil((-camera.y + viewportH) / spacing) * spacing;
     
     // Dot size
     const dotRadius = 1.5;
     
-    // Fade factor for extreme zoom levels
-    let alpha = 1;
-    if (camera.zoom < 0.2) {
-      alpha = camera.zoom / 0.2;
+    // Fade factor
+    let alpha = 0.4;
+    if (camera.zoom < 0.3) {
+      alpha = 0.2;
+    } else if (camera.zoom > 2) {
+      alpha = 0.6;
     }
     
-    // Parse the grid dot color and apply alpha
-    const dotColor = this.theme.gridDot;
-    if (dotColor.startsWith('rgba')) {
-      // Extract existing alpha and multiply
-      const match = dotColor.match(/rgba\(([^)]+)\)/);
-      if (match) {
-        const parts = match[1].split(',');
-        const existingAlpha = parseFloat(parts[3] || '1');
-        ctx.fillStyle = `rgba(${parts[0]},${parts[1]},${parts[2]}, ${existingAlpha * alpha})`;
-      } else {
-        ctx.fillStyle = dotColor;
-      }
-    } else {
-      ctx.fillStyle = dotColor;
-    }
+    // Use theme color
+    ctx.fillStyle = `rgba(128, 128, 128, ${alpha})`;
     
     // Draw dots
     for (let x = startX; x <= endX; x += spacing) {
@@ -585,11 +573,11 @@ export class Canvas2DRenderer {
   }
   
   // Convert world coordinates to screen (CSS) coordinates
-  // Uses the renderer's internal dimensions to ensure consistency with rendering
+  // Top-left anchored: no center offset for stable positions on resize
   worldToScreen(worldX: number, worldY: number, camera: Camera): { x: number; y: number } {
     return {
-      x: (worldX + camera.x) * camera.zoom + this.width / 2,
-      y: (worldY + camera.y) * camera.zoom + this.height / 2,
+      x: (worldX + camera.x) * camera.zoom,
+      y: (worldY + camera.y) * camera.zoom,
     };
   }
   

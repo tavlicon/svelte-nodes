@@ -47,8 +47,8 @@
     // Calculate bounding box of all nodes
     const nodes = Array.from(graphStore.nodes.values());
     if (nodes.length === 0) {
-      // No nodes, reset to default view
-      graphStore.setCamera({ x: 0, y: 0, zoom: 1 });
+      // No nodes, reset to default view with some offset
+      graphStore.setCamera({ x: 100, y: 100, zoom: 1 });
       showZoomMenu = false;
       return;
     }
@@ -62,27 +62,28 @@
     });
     
     // Add padding
-    const padding = 100;
-    minX -= padding;
-    minY -= padding;
-    maxX += padding;
-    maxY += padding;
+    const padding = 80;
+    const contentWidth = (maxX - minX) + padding * 2;
+    const contentHeight = (maxY - minY) + padding * 2;
     
-    // Calculate center and zoom
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-    const contentWidth = maxX - minX;
-    const contentHeight = maxY - minY;
+    // Estimate viewport size - account for sidebars (sidebar ~60px, property panel ~280px, toolbar ~52px)
+    // Use window dimensions as a base estimate
+    const viewportWidth = Math.max(600, (typeof window !== 'undefined' ? window.innerWidth : 1200) - 340);
+    const viewportHeight = Math.max(400, (typeof window !== 'undefined' ? window.innerHeight : 800) - 52);
     
-    // Estimate viewport size (roughly 1000x600 for typical screen)
-    const viewportWidth = 1000;
-    const viewportHeight = 600;
-    
+    // Calculate zoom to fit (cap for comfortable viewing)
     const zoomX = viewportWidth / contentWidth;
     const zoomY = viewportHeight / contentHeight;
-    const zoom = Math.min(zoomX, zoomY, 2); // Cap at 2x zoom
+    const finalZoom = Math.max(0.1, Math.min(zoomX, zoomY, 1.5));
     
-    graphStore.setCamera({ x: -centerX, y: -centerY, zoom: Math.max(0.1, zoom) });
+    // For top-left anchored: screenX = (worldX + camX) * zoom
+    // Content center should appear at viewport center
+    const contentCenterX = (minX + maxX) / 2;
+    const contentCenterY = (minY + maxY) / 2;
+    const camX = viewportWidth / (2 * finalZoom) - contentCenterX;
+    const camY = viewportHeight / (2 * finalZoom) - contentCenterY;
+    
+    graphStore.setCamera({ x: camX, y: camY, zoom: finalZoom });
     showZoomMenu = false;
   }
   

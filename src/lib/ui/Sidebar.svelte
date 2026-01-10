@@ -396,9 +396,13 @@
 
 <style>
   .sidebar-container {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
     display: flex;
-    height: 100%;
     z-index: 50;
+    pointer-events: auto;
   }
   
   /* Icon sidebar */

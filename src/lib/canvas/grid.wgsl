@@ -34,13 +34,27 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
   let zoom = camera.viewport.z;
   let viewport = camera.viewport.xy;
   
-  // Get camera offset from the view matrix
-  let cameraX = camera.viewProj[3][0] / camera.viewProj[0][0];
-  let cameraY = -camera.viewProj[3][1] / camera.viewProj[1][1];
+  // Extract camera from the view-projection matrix
+  // Matrix structure (column-major):
+  //   [scaleX,      0,    0, 0]
+  //   [0,      -scaleY,   0, 0]  
+  //   [0,           0,    1, 0]
+  //   [translateX, translateY, 0, 1]
+  // Where: translateX = camera.x * scaleX - 1, translateY = -camera.y * scaleY + 1
+  let scaleX = camera.viewProj[0][0];
+  let scaleY = -camera.viewProj[1][1]; // Negate to get positive scale
+  let translateX = camera.viewProj[3][0];
+  let translateY = camera.viewProj[3][1];
   
-  // Convert screen UV to world coordinates
-  let screenPos = (in.uv - 0.5) * viewport;
-  let worldPos = screenPos / zoom - vec2f(cameraX, cameraY);
+  // Recover camera position: camera.x = (translateX + 1) / scaleX
+  let cameraX = (translateX + 1.0) / scaleX;
+  let cameraY = -(translateY - 1.0) / scaleY;
+  
+  // Convert screen UV (0-1) to world coordinates (top-left anchored)
+  // effectiveZoom = scaleX * viewport.x / 2 = zoom * dpr
+  let effectiveZoom = scaleX * viewport.x * 0.5;
+  let screenPos = in.uv * viewport; // Screen position in device pixels
+  let worldPos = screenPos / effectiveZoom - vec2f(cameraX, cameraY);
   
   // Grid spacing - adjusts based on zoom level
   let baseSpacing = 40.0;
