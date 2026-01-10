@@ -97,6 +97,7 @@ export const nodeRegistry: Record<string, ExtendedNodeDefinition> = {
       imageUrl: '',
       outputPath: '',
       timeTaken: 0,
+      generationParams: null, // Stores: { prompt, negativePrompt, steps, cfg, denoise, seed, sampler, scheduler, modelName }
     },
     parameterMeta: {
       outputPath: {
@@ -107,6 +108,11 @@ export const nodeRegistry: Record<string, ExtendedNodeDefinition> = {
       timeTaken: {
         type: 'number',
         label: 'Time (ms)',
+        group: 'output',
+      },
+      generationParams: {
+        type: 'string',
+        label: 'Generation Params',
         group: 'output',
       },
     },

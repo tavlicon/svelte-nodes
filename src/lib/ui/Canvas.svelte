@@ -85,6 +85,7 @@
   // Hover state
   let hoveredNodeId = $state<string | null>(null);
   let hoveredEdgeId = $state<string | null>(null);
+  let isOverConnectorIcon = $state<string | null>(null); // Track which node's connector we're hovering
   
   // Connection dragging state
   let isConnecting = $state(false);
@@ -138,15 +139,15 @@
     
     testNodesAdded = true;
     
-    // Add an image node on the left (placeholder - no actual image)
+    // Add an image node on the left with a real input image
     const imageId = graphStore.addNode(
       'image',
-      -250, -100,
+      -300, -100,
       {
-        imageUrl: '', // Empty for now, tests port rendering
-        filename: 'placeholder',
-        originalWidth: 200,
-        originalHeight: 200,
+        imageUrl: '/data/input/nike-air-vapormax-platinumjpg-512.jpg',
+        filename: 'nike-air-vapormax-platinumjpg-512.jpg',
+        originalWidth: 512,
+        originalHeight: 512,
       },
       200, 200
     );
@@ -154,18 +155,25 @@
     // Add a model node on the right
     const modelId = graphStore.addNode(
       'model',
-      150, -60,
+      100, -60,
       {
-        modelPath: '/data/models/test.safetensors',
-        modelName: 'test-model',
+        modelPath: '/data/models/v1-5-pruned-emaonly-fp16.safetensors',
+        modelName: 'SD 1.5',
         modelType: 'safetensors',
-        modelSize: 1000000,
+        modelSize: 2133874944,
+        // Add prompts for the test
+        positive_prompt: 'a futuristic sneaker, cyberpunk style, neon lights',
+        negative_prompt: 'blurry, low quality',
       },
       200, 120
     );
     
     // Connect image output to model image input
     graphStore.addEdge(imageId, 'image', modelId, 'image');
+    
+    console.log('✅ Test nodes created and connected');
+    console.log('  Image node:', imageId);
+    console.log('  Model node:', modelId);
   }
   
   onDestroy(() => {
@@ -320,16 +328,22 @@
   }
   
   // Hit test nodes (returns topmost hit)
-  function hitTestNode(screenX: number, screenY: number): string | null {
+  // extendForHover: when true, extends hit area to right for image/output nodes (for hover detection)
+  //                 when false, uses exact node bounds (for click/drag detection)
+  function hitTestNode(screenX: number, screenY: number, extendForHover: boolean = true): string | null {
     const world = screenToWorld(screenX, screenY);
     
     // Test in reverse order (top-most first)
     const nodeArray = Array.from(graphStore.nodes.values()).reverse();
     
     for (const node of nodeArray) {
+      // Image/output nodes have extended hover area to include connector icon zone
+      // But for clicks/drags, we only use the actual node bounds
+      const extendRight = extendForHover && (node.type === 'image' || node.type === 'output') ? 40 : 0;
+      
       if (
         world.x >= node.x &&
-        world.x <= node.x + node.width &&
+        world.x <= node.x + node.width + extendRight &&
         world.y >= node.y &&
         world.y <= node.y + node.height
       ) {
@@ -429,6 +443,16 @@
       return;
     }
     
+    // Duplicate: Cmd/Ctrl + D
+    if (e.key === 'd' && (e.metaKey || e.ctrlKey) && !isInInput) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (graphStore.selectedNodeIds.size > 0) {
+        graphStore.duplicateSelectedNodes();
+      }
+      return;
+    }
+    
     if (e.code === 'Space' && !spacePressed) {
       spacePressed = true;
       e.preventDefault();
@@ -436,6 +460,7 @@
     if (e.key === 'Escape') {
       graphStore.deselectAll();
       isDragging = false;
+      isOverConnectorIcon = null;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !isInInput) {
       // Delete selected nodes
@@ -501,8 +526,14 @@
     
     // Check for port hit first (start connection)
     for (const node of graphStore.nodes.values()) {
-      const portHit = hitTestPort(world.x, world.y, node);
+      const portHit = hitTestPort(world.x, world.y, node, 12);
       if (portHit) {
+        // Image/output nodes use the plus icon for OUTPUT connections,
+        // so skip output port hits on these nodes - only allow input port hits
+        if ((node.type === 'image' || node.type === 'output') && portHit.isOutput) {
+          continue; // Skip - the plus icon handles output connections for these nodes
+        }
+        
         // Start connection dragging
         isConnecting = true;
         connectionStart = portHit;
@@ -550,7 +581,9 @@
     }
     
     // Single click: select or drag
-    const hitNodeId = hitTestNode(screenX, screenY);
+    // Use exact node bounds (extendForHover=false) so clicks in the connector zone
+    // don't trigger node drag - only clicks on the actual node do
+    const hitNodeId = hitTestNode(screenX, screenY, false);
     
     if (hitNodeId) {
       // Shift-click: toggle selection
@@ -954,10 +987,66 @@
     e.preventDefault();
   }
   
+  
+  /**
+   * Handle mouse entering a connector icon - maintains hover state
+   */
+  function handleConnectorMouseEnter(nodeId: string) {
+    isOverConnectorIcon = nodeId;
+    hoveredNodeId = nodeId;
+  }
+  
+  /**
+   * Handle mouse leaving a connector icon
+   */
+  function handleConnectorMouseLeave() {
+    isOverConnectorIcon = null;
+    // Don't clear hoveredNodeId here - let handleMouseMove handle it
+  }
+  
+  /**
+   * Handle clicking on the connector icon to start a connection
+   */
+  function handleConnectorMouseDown(e: MouseEvent | PointerEvent, nodeId: string, portId: string = 'image') {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const node = graphStore.getNodeById(nodeId);
+    if (!node) return;
+    
+    // Get the port position for this node's output
+    const portPositions = getPortPositions(node);
+    const outputPort = portPositions.find(p => p.isOutput && p.portId === portId);
+    
+    if (outputPort) {
+      isConnecting = true;
+      connectionStart = outputPort;
+      connectionEndWorld = { x: outputPort.x, y: outputPort.y };
+      isOverConnectorIcon = null; // Clear so we can drag properly
+      graphStore.deselectAll();
+      
+      // IMPORTANT: Add pointer to activePointers so handlePointerMove processes the drag
+      // This is needed because the click originated from the connector icon, not the canvas
+      if (e instanceof PointerEvent && canvasElement) {
+        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        canvasElement.setPointerCapture(e.pointerId);
+      }
+    }
+  }
+
   function handleMouseMove(e: MouseEvent) {
     // Only track hover when not dragging or panning
     if (isDragging || isPanning || mode === 'marquee' || isConnecting) {
       hoveredNodeId = null;
+      hoveredEdgeId = null;
+      isOverConnectorIcon = null;
+      return;
+    }
+    
+    // If we're over a connector icon (set by mouseenter on the icon),
+    // maintain the hover state - the canvas doesn't receive mousemove when over the icon
+    if (isOverConnectorIcon) {
+      hoveredNodeId = isOverConnectorIcon;
       hoveredEdgeId = null;
       return;
     }
@@ -967,7 +1056,7 @@
     const screenY = e.clientY - rect.top;
     const world = screenToWorld(screenX, screenY, rect.width, rect.height);
     
-    // Check for node hover first
+    // Check for node hover first (includes extended area for connector)
     const hitNodeId = hitTestNode(screenX, screenY);
     hoveredNodeId = hitNodeId;
     
@@ -983,6 +1072,7 @@
   function handleMouseLeave() {
     hoveredNodeId = null;
     hoveredEdgeId = null;
+    isOverConnectorIcon = null;
   }
   
   function handleDoubleClick(e: MouseEvent) {
@@ -1313,12 +1403,17 @@
   let imageNodes = $state<Array<{
     id: string;
     imageUrl: string;
+    filename: string;
     screenX: number;
     screenY: number;
     screenWidth: number;
     screenHeight: number;
     borderRadius: number;
     isNew: boolean;
+    isSelected: boolean;
+    isHovered: boolean;
+    status: string;
+    error: string | null;
   }>>([]);
   
   // Model nodes rendered as DOM overlays
@@ -1333,6 +1428,10 @@
     screenHeight: number;
     borderRadius: number;
     isNew: boolean;
+    isSelected: boolean;
+    isHovered: boolean;
+    status: string;
+    error: string | null;
   }>>([]);
   
   // Output nodes rendered as DOM overlays (show generated images)
@@ -1340,12 +1439,17 @@
     id: string;
     imageUrl: string;
     outputPath: string;
+    filename: string;
     screenX: number;
     screenY: number;
     screenWidth: number;
     screenHeight: number;
     borderRadius: number;
     isNew: boolean;
+    isSelected: boolean;
+    isHovered: boolean;
+    status: string;
+    error: string | null;
   }>>([]);
   
   // Port overlays computed separately to avoid performance issues
@@ -1356,6 +1460,8 @@
     // Read version to track changes - must be called before any early returns
     const version = getNodesVersion();
     const cam = graphStore.camera;
+    const selectedIds = graphStore.selectedNodeIds;
+    const hovered = hoveredNodeId; // Track hover state for reactivity
     // Track viewport for reactivity (needed because renderer.resize() doesn't change reference)
     void canvasWidth; void canvasHeight;
     
@@ -1381,12 +1487,17 @@
         return {
           id: node.id,
           imageUrl: node.params.imageUrl as string,
+          filename: (node.params.filename as string) || 'Untitled',
           screenX: topLeft.x,
           screenY: topLeft.y,
           screenWidth: bottomRight.x - topLeft.x,
           screenHeight: bottomRight.y - topLeft.y,
           borderRadius: 12 * cam.zoom,
           isNew: newlyAddedNodeIds.has(node.id),
+          isSelected: graphStore.selectedNodeIds.has(node.id),
+          isHovered: hoveredNodeId === node.id,
+          status: node.status || 'idle',
+          error: node.error || null,
         };
       });
     
@@ -1411,6 +1522,10 @@
           screenHeight: bottomRight.y - topLeft.y,
           borderRadius: 12 * cam.zoom,
           isNew: newlyAddedNodeIds.has(node.id),
+          isSelected: graphStore.selectedNodeIds.has(node.id),
+          isHovered: hoveredNodeId === node.id,
+          status: node.status || 'idle',
+          error: node.error || null,
         };
       });
     
@@ -1424,16 +1539,25 @@
           cam
         );
         
+        // Extract filename from outputPath
+        const outputPath = node.params.outputPath as string;
+        const filename = outputPath ? outputPath.split('/').pop() || 'Output' : 'Output';
+        
         return {
           id: node.id,
           imageUrl: (node.thumbnailUrl || node.params.imageUrl) as string,
-          outputPath: node.params.outputPath as string,
+          outputPath,
+          filename,
           screenX: topLeft.x,
           screenY: topLeft.y,
           screenWidth: bottomRight.x - topLeft.x,
           screenHeight: bottomRight.y - topLeft.y,
           borderRadius: 12 * cam.zoom,
           isNew: newlyAddedNodeIds.has(node.id),
+          isSelected: graphStore.selectedNodeIds.has(node.id),
+          isHovered: hoveredNodeId === node.id,
+          status: node.status || 'idle',
+          error: node.error || null,
         };
       });
   });
@@ -1458,9 +1582,14 @@
       isHighlighted: boolean;
     }> = [];
     
-    // Only calculate ports for nodes that need them (hover only, not selection)
+    // Only calculate ports for nodes that need them
+    // Image and output nodes use custom connector icon instead of port overlay
     graphStore.nodes.forEach(node => {
-      const shouldShowPorts = showAllPorts || hoveredNodeId === node.id;
+      // Skip port overlay for image/output nodes - they use custom connector icon
+      const useCustomConnector = node.type === 'image' || node.type === 'output';
+      
+      // Show ports when connecting (for all nodes) or when hovering (for non-image/output)
+      const shouldShowPorts = showAllPorts || (hoveredNodeId === node.id && !useCustomConnector);
       
       if (shouldShowPorts) {
         const positions = getPortPositions(node);
@@ -1646,82 +1775,199 @@
   <!-- Image nodes rendered as DOM overlays -->
   {#each imageNodes as img (img.id)}
     <div
-      class="image-node-overlay"
-      class:fade-in={img.isNew}
-      class:empty={!img.imageUrl}
-      style={`left: ${img.screenX}px; top: ${img.screenY}px; width: ${img.screenWidth}px; height: ${img.screenHeight}px; border-radius: ${img.borderRadius}px;`}
+      class="image-node-wrapper"
+      class:selected={img.isSelected}
+      class:hovered={img.isHovered}
+      style={`left: ${img.screenX}px; top: ${img.screenY}px;`}
     >
-      {#if img.imageUrl}
-        <img 
-          src={img.imageUrl} 
-          alt="Dropped image"
-          draggable="false"
-        />
-      {:else}
-        <div class="image-placeholder">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <circle cx="8.5" cy="8.5" r="1.5" />
-            <path d="M21 15l-5-5L5 21" />
-          </svg>
-          <span>Image</span>
+      <div
+        class="image-node-overlay"
+        class:fade-in={img.isNew}
+        class:empty={!img.imageUrl}
+        class:selected={img.isSelected}
+        class:error={img.status === 'error'}
+        style={`width: ${img.screenWidth}px; height: ${img.screenHeight}px; border-radius: ${img.borderRadius}px;`}
+      >
+        {#if img.imageUrl}
+          <img 
+            src={img.imageUrl} 
+            alt="Dropped image"
+            draggable="false"
+          />
+          <!-- Hover overlay -->
+          {#if img.isHovered && !img.isSelected}
+            <div class="image-hover-overlay"></div>
+          {/if}
+          <!-- Connector icon - replaces port, positioned at right edge -->
+          <div 
+            class="node-connector-icon" 
+            class:visible={img.isSelected || img.isHovered}
+            class:dragging={isConnecting && connectionStart?.nodeId === img.id}
+            onpointerdown={(e) => handleConnectorMouseDown(e, img.id, 'image')}
+            onmouseenter={() => handleConnectorMouseEnter(img.id)}
+            onmouseleave={handleConnectorMouseLeave}
+            role="button"
+            tabindex="-1"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 8v8M8 12h8" />
+            </svg>
+          </div>
+        {:else}
+          <div class="image-placeholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <circle cx="8.5" cy="8.5" r="1.5" />
+              <path d="M21 15l-5-5L5 21" />
+            </svg>
+            <span>Image</span>
+          </div>
+        {/if}
+        {#if img.status === 'error'}
+          <div class="node-error-badge" title={img.error || 'Error'}>!</div>
+        {/if}
+      </div>
+      <!-- Error tooltip for image node -->
+      {#if img.status === 'error' && img.error && img.isHovered}
+        <div class="node-error-tooltip" style={`max-width: ${Math.max(img.screenWidth, 200)}px;`}>
+          <span class="error-icon">⚠️</span>
+          <span class="error-text">{img.error}</span>
         </div>
       {/if}
+      <!-- Filename label - always present, fades in on hover -->
+      <div class="node-filename" class:visible={img.isHovered} style={`max-width: ${img.screenWidth}px;`}>{img.filename}</div>
     </div>
   {/each}
   
   <!-- Model nodes rendered as DOM overlays -->
   {#each modelNodes as model (model.id)}
     <div
-      class="model-node-overlay"
-      class:fade-in={model.isNew}
-      style={`left: ${model.screenX}px; top: ${model.screenY}px; width: ${model.screenWidth}px; height: ${model.screenHeight}px; border-radius: ${model.borderRadius}px;`}
+      class="model-node-wrapper"
+      class:selected={model.isSelected}
+      class:hovered={model.isHovered}
+      style={`left: ${model.screenX}px; top: ${model.screenY}px;`}
     >
-      <div class="model-node-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M12 2L2 7l10 5 10-5-10-5z" />
-          <path d="M2 17l10 5 10-5" />
-          <path d="M2 12l10 5 10-5" />
-        </svg>
+      <div
+        class="model-node-overlay"
+        class:fade-in={model.isNew}
+        class:selected={model.isSelected}
+        class:running={model.status === 'running'}
+        class:error={model.status === 'error'}
+        class:complete={model.status === 'complete'}
+        style={`width: ${model.screenWidth}px; height: ${model.screenHeight}px; border-radius: ${model.borderRadius}px;`}
+      >
+        {#if model.status === 'running'}
+          <div class="model-status-indicator running">
+            <div class="spinner"></div>
+          </div>
+        {:else if model.status === 'error'}
+          <div class="model-status-indicator error">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10" />
+              <path d="M12 8v4M12 16h.01" />
+            </svg>
+          </div>
+        {:else if model.status === 'complete'}
+          <div class="model-status-indicator complete">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M20 6L9 17l-5-5" />
+            </svg>
+          </div>
+        {:else}
+          <div class="model-node-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" />
+              <path d="M2 17l10 5 10-5" />
+              <path d="M2 12l10 5 10-5" />
+            </svg>
+          </div>
+        {/if}
+        <div class="model-node-info">
+          <span class="model-node-name">{model.modelName}</span>
+          <span class="model-node-type">{model.modelType?.toUpperCase() || 'MODEL'}</span>
+        </div>
+        {#if model.status === 'error' && model.error}
+          <div class="model-error-badge" title={model.error}>!</div>
+        {/if}
       </div>
-      <div class="model-node-info">
-        <span class="model-node-name">{model.modelName}</span>
-        <span class="model-node-type">{model.modelType.toUpperCase()}</span>
-      </div>
+      <!-- Error message tooltip - shows on hover when in error state -->
+      {#if model.status === 'error' && model.error && model.isHovered}
+        <div class="node-error-tooltip" style={`max-width: ${Math.max(model.screenWidth, 200)}px;`}>
+          <span class="error-icon">⚠️</span>
+          <span class="error-text">{model.error}</span>
+        </div>
+      {/if}
     </div>
   {/each}
   
   <!-- Output nodes rendered as DOM overlays (show generated images) -->
   {#each outputNodes as output (output.id)}
     <div
-      class="output-node-overlay"
-      class:fade-in={output.isNew}
-      class:empty={!output.imageUrl}
-      style={`left: ${output.screenX}px; top: ${output.screenY}px; width: ${output.screenWidth}px; height: ${output.screenHeight}px; border-radius: ${output.borderRadius}px;`}
+      class="image-node-wrapper"
+      class:selected={output.isSelected}
+      class:hovered={output.isHovered}
+      style={`left: ${output.screenX}px; top: ${output.screenY}px;`}
     >
-      {#if output.imageUrl}
-        <img 
-          src={output.imageUrl} 
-          alt="Generated output"
-          draggable="false"
-        />
-        <div class="output-node-badge">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M20 6L9 17l-5-5" />
-          </svg>
-        </div>
-      {:else}
-        <div class="output-placeholder">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-            <rect x="3" y="3" width="18" height="18" rx="2" />
-            <path d="M3 16l5-5 4 4 5-5 4 4" />
-          </svg>
-          <span>Output</span>
+      <div
+        class="output-node-overlay"
+        class:fade-in={output.isNew}
+        class:empty={!output.imageUrl}
+        class:selected={output.isSelected}
+        class:error={output.status === 'error'}
+        style={`width: ${output.screenWidth}px; height: ${output.screenHeight}px; border-radius: ${output.borderRadius}px;`}
+      >
+        {#if output.imageUrl}
+          <img 
+            src={output.imageUrl} 
+            alt="Generated output"
+            draggable="false"
+          />
+          <!-- Hover overlay -->
+          {#if output.isHovered && !output.isSelected}
+            <div class="image-hover-overlay"></div>
+          {/if}
+          <!-- Connector icon - replaces port, positioned at right edge -->
+          <div 
+            class="node-connector-icon" 
+            class:visible={output.isSelected || output.isHovered}
+            class:dragging={isConnecting && connectionStart?.nodeId === output.id}
+            onpointerdown={(e) => handleConnectorMouseDown(e, output.id, 'image')}
+            onmouseenter={() => handleConnectorMouseEnter(output.id)}
+            onmouseleave={handleConnectorMouseLeave}
+            role="button"
+            tabindex="-1"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 8v8M8 12h8" />
+            </svg>
+          </div>
+        {:else}
+          <div class="output-placeholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="3" width="18" height="18" rx="2" />
+              <path d="M3 16l5-5 4 4 5-5 4 4" />
+            </svg>
+            <span>Output</span>
+          </div>
+        {/if}
+        {#if output.status === 'error'}
+          <div class="node-error-badge" title={output.error || 'Error'}>!</div>
+        {/if}
+      </div>
+      <!-- Error tooltip for output node -->
+      {#if output.status === 'error' && output.error && output.isHovered}
+        <div class="node-error-tooltip" style={`max-width: ${Math.max(output.screenWidth, 200)}px;`}>
+          <span class="error-icon">⚠️</span>
+          <span class="error-text">{output.error}</span>
         </div>
       {/if}
+      <!-- Filename label - always present, fades in on hover -->
+      <div class="node-filename" class:visible={output.isHovered} style={`max-width: ${output.screenWidth}px;`}>{output.filename}</div>
     </div>
   {/each}
-  
+
   <!-- Port overlays for connection handles -->
   {#each portOverlays as port (`${port.nodeId}-${port.portId}-${port.isOutput}`)}
     <div
@@ -1861,37 +2107,43 @@
   
   .port-overlay {
     position: absolute;
-    width: 12px;
-    height: 12px;
+    width: 10px;
+    height: 10px;
     border-radius: 50%;
     transform: translate(-50%, -50%);
     pointer-events: none;
     z-index: 20;
-    border: 2px solid var(--bg-primary);
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2);
-    transition: transform 0.1s ease, box-shadow 0.1s ease;
+    background: rgba(255, 255, 255, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.5);
+    transition: transform 0.1s ease, background 0.1s ease, opacity 0.1s ease;
+    opacity: 0.6;
   }
   
   .port-overlay.type-image {
-    background: #f59e0b;
+    background: rgba(245, 158, 11, 0.4);
+    border-color: rgba(245, 158, 11, 0.7);
   }
   
   .port-overlay.type-string {
-    background: #10b981;
+    background: rgba(16, 185, 129, 0.4);
+    border-color: rgba(16, 185, 129, 0.7);
   }
   
   .port-overlay.type-tensor {
-    background: #6366f1;
+    background: rgba(99, 102, 241, 0.4);
+    border-color: rgba(99, 102, 241, 0.7);
   }
   
   .port-overlay.type-number {
-    background: #3b82f6;
+    background: rgba(59, 130, 246, 0.4);
+    border-color: rgba(59, 130, 246, 0.7);
   }
   
   .port-overlay.highlighted {
     background: #ffffff;
-    transform: translate(-50%, -50%) scale(1.3);
-    box-shadow: 0 0 8px rgba(255, 255, 255, 0.6);
+    border-color: #ffffff;
+    transform: translate(-50%, -50%) scale(1.4);
+    opacity: 1;
   }
   
   .connection-line-overlay {
@@ -1951,16 +2203,55 @@
     pointer-events: none;
   }
   
-  .image-node-overlay {
+  /* Image node wrapper - contains image + connector + filename */
+  .image-node-wrapper {
     position: absolute;
     z-index: 1;
-    border-radius: 12px;
-    overflow: hidden;
     pointer-events: none;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    background: transparent;
+  }
+  
+  .image-node-overlay {
+    position: relative;
+    border-radius: 12px;
+    overflow: visible; /* Allow connector icon to show outside bounds */
+    pointer-events: none;
     background: #1a1a1e;
     user-select: none;
     -webkit-user-select: none;
+    transition: border 0.15s ease;
+    border: 1px solid transparent;
+  }
+  
+  /* Selected state - Figma border (slightly thicker for visibility) */
+  .image-node-overlay.selected {
+    border: 1px solid #9E9EA0;
+    box-shadow: 0 0 0 0.5px rgba(158, 158, 160, 0.3);
+  }
+  
+  /* Error state for image nodes */
+  .image-node-overlay.error {
+    border: 2px solid #ef4444;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+  }
+  
+  /* Error badge for image/output nodes */
+  .node-error-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 20px;
+    height: 20px;
+    background: #ef4444;
+    border-radius: 50%;
+    color: white;
+    font-weight: 700;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+    z-index: 10;
   }
   
   .image-node-overlay img {
@@ -1971,12 +2262,76 @@
     user-select: none;
     -webkit-user-select: none;
     -webkit-user-drag: none;
+    border-radius: 11px; /* Slightly less than parent to account for border */
     pointer-events: none;
   }
   
   .image-node-overlay.empty {
     border: 2px dashed rgba(255, 255, 255, 0.3);
     background: rgba(77, 156, 230, 0.15);
+  }
+  
+  /* Hover overlay - removed dark filter per Figma design */
+  .image-hover-overlay {
+    display: none;
+  }
+  
+  /* Connector icon - positioned at middle-right edge, replaces port */
+  .node-connector-icon {
+    position: absolute;
+    right: -26px;
+    top: 50%;
+    transform: translateY(-50%) translateX(-6px);
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 100;
+    opacity: 0;
+    transition: opacity 180ms ease-out, transform 180ms ease-out;
+    cursor: crosshair;
+  }
+  
+  .node-connector-icon.visible {
+    opacity: 1;
+    transform: translateY(-50%) translateX(0);
+    pointer-events: auto;
+  }
+  
+  .node-connector-icon svg {
+    width: 20px;
+    height: 20px;
+    color: rgba(158, 158, 160, 1);
+    transition: color 0.1s ease;
+  }
+  
+  .node-connector-icon:hover svg,
+  .node-connector-icon:active svg,
+  .node-connector-icon.dragging svg {
+    color: rgba(244, 244, 244, 1);
+  }
+  
+  /* Filename label - Kode Mono font, positioned below image, wraps to node width */
+  .node-filename {
+    font-family: 'Kode Mono', 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    font-size: 12px;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.65);
+    background: transparent;
+    margin-top: 8px;
+    text-align: left;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 140ms cubic-bezier(0.0, 0, 0.2, 1);
+  }
+  
+  .node-filename.visible {
+    opacity: 1;
   }
   
   .image-placeholder {
@@ -2018,11 +2373,18 @@
     }
   }
   
-  .model-node-overlay {
+  /* Model node wrapper - contains model + error tooltip */
+  .model-node-wrapper {
     position: absolute;
     z-index: 1;
+    pointer-events: none;
+    background: transparent;
+  }
+  
+  .model-node-overlay {
+    position: relative;
     border-radius: 12px;
-    overflow: hidden;
+    overflow: visible;
     pointer-events: none;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%);
@@ -2034,6 +2396,27 @@
     gap: 8px;
     user-select: none;
     -webkit-user-select: none;
+    border: 2px solid transparent;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+  
+  .model-node-overlay.selected {
+    border-color: #9E9EA0;
+  }
+  
+  .model-node-overlay.running {
+    border-color: #3b82f6;
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+  }
+  
+  .model-node-overlay.error {
+    border-color: #ef4444;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+    background: linear-gradient(135deg, #dc2626 0%, #7f1d1d 100%);
+  }
+  
+  .model-node-overlay.complete {
+    border-color: #22c55e;
   }
   
   .model-node-icon {
@@ -2086,17 +2469,131 @@
     -webkit-user-select: none;
   }
   
+  /* Model status indicators */
+  .model-status-indicator {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 12px;
+  }
+  
+  .model-status-indicator.running {
+    background: rgba(59, 130, 246, 0.3);
+  }
+  
+  .model-status-indicator.error {
+    background: rgba(239, 68, 68, 0.3);
+  }
+  
+  .model-status-indicator.complete {
+    background: rgba(34, 197, 94, 0.3);
+  }
+  
+  .model-status-indicator svg {
+    width: 24px;
+    height: 24px;
+    color: white;
+  }
+  
+  .model-status-indicator .spinner {
+    width: 24px;
+    height: 24px;
+    border: 3px solid rgba(255, 255, 255, 0.3);
+    border-top-color: white;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  
+  @keyframes spin {
+    to { transform: rotate(360deg); }
+  }
+  
+  /* Error badge - shows ! in corner when error */
+  .model-error-badge {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    width: 20px;
+    height: 20px;
+    background: #ef4444;
+    border-radius: 50%;
+    color: white;
+    font-weight: 700;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+  }
+  
+  /* Error tooltip - shows detailed error message on hover */
+  .node-error-tooltip {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    margin-top: 8px;
+    padding: 10px 12px;
+    background: #1f1f23;
+    border: 1px solid #ef4444;
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+    z-index: 100;
+    pointer-events: none;
+    animation: tooltip-fade-in 0.15s ease-out;
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  @keyframes tooltip-fade-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  
+  .node-error-tooltip .error-icon {
+    font-size: 14px;
+    flex-shrink: 0;
+  }
+  
+  .node-error-tooltip .error-text {
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    font-size: 11px;
+    color: #fca5a5;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+  
   /* Output node overlay - shows generated images */
   .output-node-overlay {
-    position: absolute;
-    z-index: 1;
+    position: relative;
     border-radius: 12px;
-    overflow: hidden;
+    overflow: visible; /* Allow connector icon to show outside bounds */
     pointer-events: none;
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15), 0 0 0 2px rgba(52, 211, 153, 0.5);
     background: #1a1a1e;
     user-select: none;
     -webkit-user-select: none;
+    transition: border 0.15s ease;
+    border: 0.509px solid transparent;
+  }
+  
+  /* Selected state - Figma border */
+  .output-node-overlay.selected {
+    border: 1px solid #9E9EA0;
+  }
+  
+  /* Error state for output nodes */
+  .output-node-overlay.error {
+    border: 2px solid #ef4444;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
   }
   
   .output-node-overlay img {
@@ -2108,31 +2605,12 @@
     -webkit-user-select: none;
     -webkit-user-drag: none;
     pointer-events: none;
+    border-radius: 11px; /* Match parent's border-radius minus border */
   }
   
   .output-node-overlay.empty {
     border: 2px dashed rgba(52, 211, 153, 0.5);
     background: rgba(52, 211, 153, 0.1);
-  }
-  
-  .output-node-badge {
-    position: absolute;
-    bottom: 8px;
-    right: 8px;
-    width: 24px;
-    height: 24px;
-    background: rgba(52, 211, 153, 0.9);
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-  }
-  
-  .output-node-badge svg {
-    width: 14px;
-    height: 14px;
-    color: white;
   }
   
   .output-placeholder {
@@ -2170,32 +2648,14 @@
     border-radius: 4px;
   }
   
+  /* Hover bounds - hidden for new design (handled by node overlay) */
   .hover-bounds {
-    position: absolute;
-    z-index: 9;
-    border: 1px solid var(--accent-primary);
-    opacity: 0.5;
-    pointer-events: none;
-    border-radius: 4px;
-    animation: hover-frame-in 50ms ease-out forwards;
+    display: none;
   }
   
-  @keyframes hover-frame-in {
-    from {
-      opacity: 0;
-      transform: scale(0.98);
-    }
-    to {
-      opacity: 0.5;
-      transform: scale(1);
-    }
-  }
-  
+  /* Selection bounds - only show for multi-node selection */
   .selection-bounds {
-    position: absolute;
-    z-index: 0; /* Below image overlays to prevent border showing over other images */
-    border: 2px solid rgba(255, 255, 255, 0.5);
-    pointer-events: none;
+    display: none;
   }
   
   .selection-handle {

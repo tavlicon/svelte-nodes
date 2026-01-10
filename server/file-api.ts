@@ -34,7 +34,7 @@ async function listFiles(directory: string): Promise<FileInfo[]> {
       allowedExtensions = ['.safetensors', '.onnx', '.pt', '.pth', '.bin', '.ckpt'];
       break;
     default:
-      allowedExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg'];
+      allowedExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif'];
   }
   
   try {
@@ -119,6 +119,7 @@ export function fileApiPlugin(): Plugin {
               '.gif': 'image/gif',
               '.webp': 'image/webp',
               '.svg': 'image/svg+xml',
+              '.avif': 'image/avif',
             };
             res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
             res.end(data);

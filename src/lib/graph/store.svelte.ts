@@ -368,6 +368,45 @@ function selectNode(id: string, addToSelection = false) {
   }
 }
 
+/**
+ * Duplicate all selected nodes, offset by 20px
+ * Returns the IDs of the newly created nodes
+ */
+function duplicateSelectedNodes(): string[] {
+  const newIds: string[] = [];
+  const offset = 20;
+  
+  selectedNodeIds.forEach(nodeId => {
+    const node = nodes.get(nodeId);
+    if (!node) return;
+    
+    // Create a copy of the node with a new position
+    const newId = addNode(
+      node.type,
+      node.x + offset,
+      node.y + offset,
+      { ...node.params }, // Deep copy params
+      node.width,
+      node.height
+    );
+    
+    // Copy thumbnail if present
+    if (node.thumbnailUrl) {
+      updateNode(newId, { thumbnailUrl: node.thumbnailUrl });
+    }
+    
+    newIds.push(newId);
+  });
+  
+  // Select the newly created nodes
+  if (newIds.length > 0) {
+    selectedNodeIds = new Set(newIds);
+    selectedEdgeIds = new Set();
+  }
+  
+  return newIds;
+}
+
 function deselectAll() {
   selectedNodeIds = new Set();
   selectedEdgeIds = new Set();
@@ -480,6 +519,7 @@ export const graphStore = {
   deleteEdge,
   selectNode,
   deselectAll,
+  duplicateSelectedNodes,
   setCamera,
   updateCanvasState,
   getNodeById,

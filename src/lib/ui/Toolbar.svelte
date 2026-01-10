@@ -20,6 +20,7 @@
   });
   
   let isExecuting = $state(false);
+  let lastExecutionError = $state<string | null>(null);
   
   // Check backend status on mount
   $effect(() => {
@@ -46,8 +47,16 @@
   async function handleRunGraph() {
     if (isExecuting) return;
     isExecuting = true;
+    lastExecutionError = null;
     try {
-      await executionEngine.execute();
+      const result = await executionEngine.execute();
+      if (!result.success && result.error) {
+        lastExecutionError = result.error;
+        console.error('Pipeline execution failed:', result.error);
+      }
+    } catch (error) {
+      lastExecutionError = error instanceof Error ? error.message : String(error);
+      console.error('Pipeline execution error:', lastExecutionError);
     } finally {
       isExecuting = false;
     }
@@ -209,18 +218,32 @@
     
     <button 
       class="toolbar-btn run-btn"
+      class:error={lastExecutionError !== null}
       onclick={handleRunGraph}
       disabled={isExecuting || graphStore.nodes.size === 0}
-      title="Run the graph"
+      title={lastExecutionError ? `Last error: ${lastExecutionError}` : 'Run the graph'}
     >
       {#if isExecuting}
         <span class="spinner"></span>
         Running...
+      {:else if lastExecutionError}
+        <span class="icon">⚠️</span>
+        Error
       {:else}
         <span class="icon">▶</span>
         Run
       {/if}
     </button>
+    
+    {#if lastExecutionError}
+      <button 
+        class="toolbar-btn clear-error"
+        onclick={() => lastExecutionError = null}
+        title="Clear error"
+      >
+        ✕
+      </button>
+    {/if}
   </div>
   
   <div class="toolbar-section view">
@@ -491,6 +514,29 @@
     background: var(--bg-tertiary);
     border-color: var(--border-subtle);
     color: var(--text-muted);
+  }
+  
+  .run-btn.error {
+    background: #ef4444;
+    border-color: #ef4444;
+  }
+  
+  .run-btn.error:hover:not(:disabled) {
+    background: #dc2626;
+    border-color: #dc2626;
+  }
+  
+  .clear-error {
+    padding: 6px 8px;
+    font-size: 12px;
+    background: #ef4444;
+    border-color: #ef4444;
+    color: white;
+  }
+  
+  .clear-error:hover {
+    background: #dc2626;
+    border-color: #dc2626;
   }
   
   .spinner {

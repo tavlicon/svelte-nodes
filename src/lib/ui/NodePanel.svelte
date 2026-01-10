@@ -98,12 +98,63 @@
           <div class="output-path">
             <code class="path-text">{selectedNode.params.outputPath}</code>
           </div>
-          {#if selectedNode.params.timeTaken}
-            <div class="output-meta">
-              <span class="meta-label">Generation time:</span>
-              <span class="meta-value">{(selectedNode.params.timeTaken / 1000).toFixed(2)}s</span>
+        </section>
+      {/if}
+      
+      {#if selectedNode.type === 'output' && selectedNode.params.generationParams}
+        {@const params = selectedNode.params.generationParams as Record<string, unknown>}
+        <section class="output-section">
+          <h3 class="section-title">Generation Settings</h3>
+          <div class="generation-params">
+            <div class="params-grid">
+              {#if params.prompt}
+                <div class="param-item full-width">
+                  <span class="param-key">Prompt</span>
+                </div>
+                <div class="param-item full-width" style="margin-bottom: 4px;">
+                  <span class="param-val prompt" title={params.prompt as string}>{params.prompt}</span>
+                </div>
+              {/if}
+              {#if params.negativePrompt}
+                <div class="param-item full-width">
+                  <span class="param-key">Negative</span>
+                </div>
+                <div class="param-item full-width" style="margin-bottom: 4px;">
+                  <span class="param-val prompt" title={params.negativePrompt as string}>{params.negativePrompt}</span>
+                </div>
+              {/if}
+              <div class="param-item">
+                <span class="param-key">Steps</span>
+                <span class="param-val">{params.steps}</span>
+              </div>
+              <div class="param-item">
+                <span class="param-key">CFG</span>
+                <span class="param-val">{params.cfg}</span>
+              </div>
+              <div class="param-item">
+                <span class="param-key">Denoise</span>
+                <span class="param-val">{params.denoise}</span>
+              </div>
+              <div class="param-item">
+                <span class="param-key">Seed</span>
+                <span class="param-val">{params.seed}</span>
+              </div>
+              <div class="param-item">
+                <span class="param-key">Sampler</span>
+                <span class="param-val">{params.sampler}</span>
+              </div>
+              <div class="param-item">
+                <span class="param-key">Scheduler</span>
+                <span class="param-val">{params.scheduler}</span>
+              </div>
+              {#if selectedNode.params.timeTaken}
+                <div class="param-item full-width" style="margin-top: 4px; border-top: 1px solid var(--border-subtle); padding-top: 4px;">
+                  <span class="param-key">Time</span>
+                  <span class="param-val">{(selectedNode.params.timeTaken as number / 1000).toFixed(2)}s</span>
+                </div>
+              {/if}
             </div>
-          {/if}
+          </div>
         </section>
       {/if}
     </div>
@@ -148,7 +199,7 @@
   }
   
   .panel-header {
-    padding: 16px;
+    padding: 12px 14px;
     border-bottom: 1px solid var(--border-subtle);
   }
   
@@ -161,57 +212,58 @@
   }
   
   .node-name {
-    font-size: 16px;
+    font-size: 15px;
     font-weight: 600;
-    margin-top: 4px;
+    margin-top: 2px;
   }
   
   .panel-content {
     flex: 1;
     overflow-y: auto;
-    padding: 16px;
+    padding: 12px 14px;
   }
   
   .prompts-section,
   .params-section,
   .status-section,
-  .preview-section {
-    margin-bottom: 24px;
+  .preview-section,
+  .output-section {
+    margin-bottom: 16px;
   }
   
   .prompts-section {
-    padding-bottom: 20px;
+    padding-bottom: 14px;
     border-bottom: 1px solid var(--border-subtle);
   }
   
   .section-title {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--text-muted);
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
   
   .status-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 12px;
+    padding: 6px 10px;
     background: var(--bg-tertiary);
     border-radius: var(--radius-md);
   }
   
   .status-label {
-    font-size: 13px;
+    font-size: 12px;
     color: var(--text-secondary);
   }
   
   .status-value {
-    font-size: 12px;
+    font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
-    padding: 2px 8px;
+    padding: 2px 6px;
     border-radius: var(--radius-sm);
   }
   
@@ -241,13 +293,13 @@
   }
   
   .error-message {
-    margin-top: 8px;
-    padding: 8px 12px;
+    margin-top: 6px;
+    padding: 6px 10px;
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.2);
     border-radius: var(--radius-md);
     color: var(--error);
-    font-size: 12px;
+    font-size: 11px;
   }
   
   .preview-image {
@@ -263,42 +315,88 @@
     object-fit: contain;
   }
   
-  .output-section {
-    margin-bottom: 24px;
-  }
-  
   .output-path {
     background: var(--bg-tertiary);
     border-radius: var(--radius-md);
-    padding: 12px;
-    margin-bottom: 12px;
+    padding: 8px 10px;
+    margin-bottom: 8px;
   }
   
   .path-text {
     font-family: 'JetBrains Mono', 'SF Mono', 'Fira Code', monospace;
-    font-size: 11px;
+    font-size: 10px;
     color: var(--success);
     word-break: break-all;
-    line-height: 1.5;
+    line-height: 1.4;
   }
   
   .output-meta {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 12px;
+    padding: 5px 10px;
     background: var(--bg-tertiary);
     border-radius: var(--radius-md);
+    margin-bottom: 4px;
   }
   
   .meta-label {
-    font-size: 12px;
+    font-size: 11px;
     color: var(--text-secondary);
   }
   
   .meta-value {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-primary);
+  }
+  
+  .generation-params {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+  }
+  
+  .params-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 4px 12px;
+  }
+  
+  .param-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 10px;
+    padding: 2px 0;
+  }
+  
+  .param-item.full-width {
+    grid-column: 1 / -1;
+  }
+  
+  .param-key {
+    color: var(--text-muted);
+  }
+  
+  .param-val {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    text-align: right;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  .param-val.prompt {
+    max-width: 100%;
+    font-size: 10px;
+    font-style: italic;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 </style>

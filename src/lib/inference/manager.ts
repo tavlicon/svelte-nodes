@@ -138,16 +138,82 @@ class InferenceManager {
   
   /**
    * Convert image URL to Blob for FormData
+   * Throws descriptive error if URL is invalid or image can't be loaded
    */
   private async imageUrlToBlob(url: string): Promise<Blob> {
-    if (url.startsWith('data:')) {
-      // Convert base64 to blob
-      const response = await fetch(url);
-      return response.blob();
+    // Validate input
+    if (!url || url.trim() === '') {
+      throw new Error('No input image provided. Please connect an image node to the model input.');
     }
     
-    const response = await fetch(url);
-    return response.blob();
+    // Debug: console.log('📷 Converting image URL to blob:', url.substring(0, 100));
+    
+    try {
+      let blob: Blob;
+      
+      if (url.startsWith('data:')) {
+        // Convert base64 to blob
+        const response = await fetch(url);
+        if (!response.ok) {
+          throw new Error('Failed to parse base64 image data');
+        }
+        blob = await response.blob();
+      } else {
+        // Fetch from URL - make sure it's an absolute URL
+        let fetchUrl = url;
+        if (url.startsWith('/')) {
+          // Relative URL - prepend the origin
+          fetchUrl = `${window.location.origin}${url}`;
+        }
+        
+        // Debug: console.log('  Fetching from:', fetchUrl);
+        const response = await fetch(fetchUrl);
+        
+        if (!response.ok) {
+          throw new Error(`Failed to load image from URL (${response.status}): ${response.statusText}`);
+        }
+        
+        // Check content type from response
+        const contentType = response.headers.get('content-type') || '';
+        // Debug: console.log('  Response content-type:', contentType);
+        
+        if (!contentType.startsWith('image/') && !contentType.includes('octet-stream')) {
+          // Server might have returned an error page
+          const text = await response.text();
+          if (text.includes('<!DOCTYPE') || text.includes('<html')) {
+            throw new Error(`URL returned HTML instead of image. The file may not exist at: ${url}`);
+          }
+          throw new Error(`URL returned non-image content type: ${contentType}`);
+        }
+        
+        blob = await response.blob();
+      }
+      
+      // Debug: console.log('  Blob size:', blob.size, 'bytes, type:', blob.type);
+      
+      // Validate that we got a blob with content
+      if (blob.size === 0) {
+        throw new Error('Image file is empty or could not be loaded');
+      }
+      
+      // Validate it's actually image data by trying to create an ImageBitmap
+      try {
+        const imageBitmap = await createImageBitmap(blob);
+        // Debug: console.log('  ✅ Valid image:', imageBitmap.width, 'x', imageBitmap.height);
+        imageBitmap.close(); // Clean up
+      } catch (e) {
+        throw new Error(`Invalid image data: the file could not be decoded as an image. Check if the file exists at: ${url}`);
+      }
+      
+      return blob;
+      
+    } catch (error) {
+      console.error('❌ Image loading error:', error);
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Failed to load input image: ${error}`);
+    }
   }
   
   /**
@@ -222,9 +288,21 @@ class InferenceManager {
       console.log('📬 Response status:', response.status);
       
       if (!response.ok) {
-        const error = await response.json();
-        console.error('❌ Backend error:', error);
-        throw new Error(error.detail || 'Inference failed');
+        let errorMessage = `Backend error (${response.status})`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorMessage;
+          console.error('❌ Backend error:', errorData);
+        } catch {
+          // If JSON parsing fails, try text
+          try {
+            const errorText = await response.text();
+            if (errorText) errorMessage = errorText;
+          } catch {
+            // Use status-based message
+          }
+        }
+        throw new Error(errorMessage);
       }
       
       const result = await response.json();
@@ -244,7 +322,11 @@ class InferenceManager {
       
     } catch (error) {
       console.error('❌ Backend img2img error:', error);
-      throw error;
+      // Re-throw with cleaner message for display
+      if (error instanceof Error) {
+        throw error;
+      }
+      throw new Error(`Inference failed: ${error}`);
     }
   }
   
@@ -256,44 +338,13 @@ class InferenceManager {
     onProgress: ProgressCallback,
     startTime: number
   ): Promise<InferenceResult> {
-    return new Promise((resolve, reject) => {
-      // For SSE with POST, we need a different approach
-      // Use the regular endpoint and poll for progress
-      // Or use the base64 endpoint with streaming
-      
-      fetch(`${BACKEND_URL}/api/img2img`, {
-        method: 'POST',
-        body: formData,
-      })
-        .then(async (response) => {
-          if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.detail || 'Inference failed');
-          }
-          return response.json();
-        })
-        .then((result) => {
-          // Send final progress
-          onProgress({
-            step: result.steps || 20,
-            totalSteps: result.steps || 20,
-            status: 'complete',
-          });
-          
-          resolve({
-            imageData: null,
-            imageUrl: result.image,
-            timeTaken: result.time_taken * 1000,
-            outputPath: result.output_path,
-          });
-        })
-        .catch(reject);
-      
-      // Simulate progress updates while waiting
-      // (Real progress would require WebSocket or SSE)
-      let currentStep = 0;
-      const totalSteps = parseInt(formData.get('steps') as string) || 20;
-      const progressInterval = setInterval(() => {
+    // Simulate progress updates while waiting
+    let currentStep = 0;
+    const totalSteps = parseInt(formData.get('steps') as string) || 20;
+    let progressInterval: ReturnType<typeof setInterval> | null = null;
+    
+    const startProgress = () => {
+      progressInterval = setInterval(() => {
         if (currentStep < totalSteps - 1) {
           currentStep++;
           onProgress({
@@ -303,10 +354,66 @@ class InferenceManager {
           });
         }
       }, 500);
+    };
+    
+    const stopProgress = () => {
+      if (progressInterval) {
+        clearInterval(progressInterval);
+        progressInterval = null;
+      }
+    };
+    
+    startProgress();
+    
+    try {
+      const response = await fetch(`${BACKEND_URL}/api/img2img`, {
+        method: 'POST',
+        body: formData,
+      });
       
-      // Clear interval when done (will be cleared by promise resolution)
-      setTimeout(() => clearInterval(progressInterval), 60000); // Max 60s timeout
-    });
+      if (!response.ok) {
+        let errorMessage = `Backend error (${response.status})`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorMessage;
+        } catch {
+          try {
+            const errorText = await response.text();
+            if (errorText) errorMessage = errorText;
+          } catch {
+            // Use status-based message
+          }
+        }
+        throw new Error(errorMessage);
+      }
+      
+      const result = await response.json();
+      
+      // Send final progress
+      onProgress({
+        step: result.steps || totalSteps,
+        totalSteps: result.steps || totalSteps,
+        status: 'complete',
+      });
+      
+      return {
+        imageData: null,
+        imageUrl: result.image,
+        timeTaken: result.time_taken * 1000,
+        outputPath: result.output_path,
+      };
+      
+    } catch (error) {
+      // Send error progress
+      onProgress({
+        step: currentStep,
+        totalSteps: totalSteps,
+        status: 'error',
+      });
+      throw error;
+    } finally {
+      stopProgress();
+    }
   }
   
   /**

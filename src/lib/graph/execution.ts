@@ -112,11 +112,12 @@ class ExecutionEngine {
   
   /**
    * Execute the graph
+   * Returns true if execution completed successfully, false if any node failed
    */
-  async execute() {
+  async execute(): Promise<{ success: boolean; error?: string; failedNodeId?: string }> {
     if (this.running) {
       console.log('Execution already in progress');
-      return;
+      return { success: false, error: 'Execution already in progress' };
     }
     
     // Rebuild graph
@@ -127,7 +128,7 @@ class ExecutionEngine {
     
     if (order.length === 0) {
       console.log('No dirty nodes to execute');
-      return;
+      return { success: true };
     }
     
     console.log('Execution order:', order);
@@ -137,6 +138,15 @@ class ExecutionEngine {
       for (const nodeId of order) {
         await this.executeNode(nodeId);
       }
+      return { success: true };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error('Pipeline execution failed:', errorMessage);
+      return { 
+        success: false, 
+        error: errorMessage,
+        failedNodeId: order.find(id => graphStore.getNodeById(id)?.status === 'error'),
+      };
     } finally {
       this.running = false;
     }
@@ -217,11 +227,18 @@ class ExecutionEngine {
       }
       
     } catch (error) {
-      console.error(`Error executing node ${nodeId}:`, error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.error(`Error executing node ${nodeId}:`, errorMessage);
+      
+      // Set node to error state with detailed message
       graphStore.updateNode(nodeId, {
         status: 'error',
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
+        outputCache: {}, // Clear any partial outputs
       });
+      
+      // Re-throw to stop pipeline execution on error
+      throw error;
     }
   }
   
@@ -285,16 +302,21 @@ class ExecutionEngine {
     // Get input image (from connected image node)
     const inputImage = inputs.image as string | undefined;
     
-    if (!inputImage) {
-      throw new Error('No input image connected');
+    if (!inputImage || inputImage.trim() === '') {
+      throw new Error('No input image connected. Connect an Image node to the model\'s image input port.');
+    }
+    
+    // Validate input image URL/data
+    if (!inputImage.startsWith('data:') && !inputImage.startsWith('http') && !inputImage.startsWith('/')) {
+      throw new Error(`Invalid image input: "${inputImage.substring(0, 50)}...". Expected a URL or base64 data.`);
     }
     
     // Get prompts from node params
     const positivePrompt = (node.params.positive_prompt as string) || '';
     const negativePrompt = (node.params.negative_prompt as string) || '';
     
-    if (!positivePrompt) {
-      throw new Error('No positive prompt provided');
+    if (!positivePrompt || positivePrompt.trim() === '') {
+      throw new Error('No positive prompt provided. Enter a prompt in the model node\'s parameters.');
     }
     
     // Build img2img request with KSampler params
@@ -357,6 +379,19 @@ class ExecutionEngine {
     modelNode: NodeInstance,
     result: { imageUrl: string | null; outputPath?: string; timeTaken: number }
   ) {
+    // Extract generation parameters from model node
+    const generationParams = {
+      prompt: modelNode.params.positive_prompt as string || '',
+      negativePrompt: modelNode.params.negative_prompt as string || '',
+      steps: modelNode.params.steps as number || 0,
+      cfg: modelNode.params.cfg as number || 0,
+      denoise: modelNode.params.denoise as number || 0,
+      seed: modelNode.params.seed as number || 0,
+      sampler: modelNode.params.sampler_name as string || '',
+      scheduler: modelNode.params.scheduler as string || '',
+      modelName: modelNode.params.modelName as string || 'SD 1.5',
+    };
+    
     // Look for existing output node connected to this model
     const existingOutputEdge = Array.from(graphStore.edges.values()).find(
       edge => edge.sourceNodeId === modelNode.id && 
@@ -372,6 +407,7 @@ class ExecutionEngine {
           imageUrl: result.imageUrl || '',
           outputPath: result.outputPath || '',
           timeTaken: Math.round(result.timeTaken),
+          generationParams,
         },
       });
     } else {
@@ -380,6 +416,7 @@ class ExecutionEngine {
         imageUrl: result.imageUrl || '',
         outputPath: result.outputPath || '',
         timeTaken: Math.round(result.timeTaken),
+        generationParams,
       });
       
       // Set thumbnail

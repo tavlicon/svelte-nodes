@@ -133,13 +133,13 @@
   .parameter-editor {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: 8px;
   }
   
   .param-row {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 4px;
   }
   
   .param-row.full-width {
@@ -147,7 +147,7 @@
   }
   
   .param-label {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 500;
     color: var(--text-secondary);
     text-transform: capitalize;
@@ -157,13 +157,13 @@
   .param-textarea,
   .param-select {
     width: 100%;
-    padding: 10px 12px;
+    padding: 8px 10px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-md);
     color: var(--text-primary);
     font-family: var(--font-sans);
-    font-size: 13px;
+    font-size: 12px;
     transition: border-color 0.15s ease;
   }
   
@@ -175,7 +175,7 @@
   }
   
   .param-textarea {
-    min-height: 80px;
+    min-height: 60px;
     resize: vertical;
     font-family: var(--font-mono);
   }
@@ -198,22 +198,22 @@
   .slider-container {
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: 8px;
   }
   
   .param-slider {
     flex: 1;
-    height: 6px;
+    height: 4px;
     appearance: none;
     background: var(--bg-tertiary);
-    border-radius: 3px;
+    border-radius: 2px;
     cursor: pointer;
   }
   
   .param-slider::-webkit-slider-thumb {
     appearance: none;
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
     background: var(--accent-primary);
     border-radius: 50%;
     cursor: grab;
@@ -222,7 +222,7 @@
   
   .param-slider::-webkit-slider-thumb:hover {
     transform: scale(1.1);
-    box-shadow: 0 0 8px var(--accent-glow);
+    box-shadow: 0 0 6px var(--accent-glow);
   }
   
   .param-slider::-webkit-slider-thumb:active {
@@ -231,8 +231,8 @@
   }
   
   .param-slider::-moz-range-thumb {
-    width: 16px;
-    height: 16px;
+    width: 12px;
+    height: 12px;
     background: var(--accent-primary);
     border: none;
     border-radius: 50%;
@@ -240,11 +240,11 @@
   }
   
   .slider-value {
-    min-width: 48px;
-    padding: 4px 8px;
+    min-width: 40px;
+    padding: 3px 6px;
     background: var(--bg-tertiary);
     border-radius: var(--radius-sm);
-    font-size: 12px;
+    font-size: 11px;
     font-family: var(--font-mono);
     text-align: center;
     color: var(--text-primary);
