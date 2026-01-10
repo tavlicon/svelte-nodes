@@ -131,6 +131,29 @@
     e.dataTransfer.effectAllowed = 'copy';
   }
   
+  // Click-to-add: dispatch event to add image to canvas
+  function handleImageClick(file: FileInfo) {
+    window.dispatchEvent(new CustomEvent('sidebar-add-image', {
+      detail: {
+        path: file.path,
+        name: file.name,
+        type: file.type,
+      }
+    }));
+  }
+  
+  // Click-to-add: dispatch event to add model to canvas
+  function handleModelClick(file: FileInfo) {
+    window.dispatchEvent(new CustomEvent('sidebar-add-model', {
+      detail: {
+        path: file.path,
+        name: file.name,
+        type: file.type,
+        size: file.size,
+      }
+    }));
+  }
+  
   onMount(() => {
     window.addEventListener('files-changed', handleFilesChanged as EventListener);
     // Initial load
@@ -239,11 +262,14 @@
             {:else}
               <div class="file-grid">
                 {#each generatedFiles as file (file.name)}
-                  <div 
+                  <button 
                     class="file-card" 
                     title={file.name}
+                    aria-label={`Add ${file.name} to canvas`}
                     draggable="true"
                     ondragstart={(e) => handleImageDragStart(e, file)}
+                    onclick={() => handleImageClick(file)}
+                    type="button"
                   >
                     <div class="file-thumbnail">
                       <img src={file.path} alt={file.name} loading="lazy" draggable="false" />
@@ -252,7 +278,7 @@
                       <span class="file-name">{file.name}</span>
                       <span class="file-size">{formatFileSize(file.size)}</span>
                     </div>
-                  </div>
+                  </button>
                 {/each}
               </div>
             {/if}
@@ -269,11 +295,14 @@
             {:else}
               <div class="file-grid">
                 {#each importedFiles as file (file.name)}
-                  <div 
+                  <button 
                     class="file-card" 
                     title={file.name}
+                    aria-label={`Add ${file.name} to canvas`}
                     draggable="true"
                     ondragstart={(e) => handleImageDragStart(e, file)}
+                    onclick={() => handleImageClick(file)}
+                    type="button"
                   >
                     <div class="file-thumbnail">
                       <img src={file.path} alt={file.name} loading="lazy" draggable="false" />
@@ -282,7 +311,7 @@
                       <span class="file-name">{file.name}</span>
                       <span class="file-size">{formatFileSize(file.size)}</span>
                     </div>
-                  </div>
+                  </button>
                 {/each}
               </div>
             {/if}
@@ -319,11 +348,14 @@
           {:else}
             <div class="file-list">
               {#each modelFiles as file (file.name)}
-                <div 
+                <button 
                   class="file-item model-item" 
                   title={file.name}
+                  aria-label={`Add ${file.name} to canvas`}
                   draggable="true"
                   ondragstart={(e) => handleModelDragStart(e, file)}
+                  onclick={() => handleModelClick(file)}
+                  type="button"
                 >
                   <div class="model-icon">
                     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -339,7 +371,7 @@
                       <span class="file-size">{formatFileSize(file.size)}</span>
                     </div>
                   </div>
-                </div>
+                </button>
               {/each}
             </div>
           {/if}
@@ -587,6 +619,12 @@
     cursor: pointer;
     transition: background 0.15s ease;
     gap: 10px;
+    /* Reset button styles */
+    font: inherit;
+    text-align: left;
+    width: 100%;
+    border: 1px solid var(--border-subtle);
+    color: inherit;
   }
   
   .file-item:hover {
@@ -693,6 +731,10 @@
     background: var(--bg-secondary);
     border-radius: var(--radius-md);
     overflow: hidden;
+    /* Reset button styles */
+    font: inherit;
+    padding: 0;
+    text-align: left;
     cursor: pointer;
     transition: all 0.15s ease;
     border: 1px solid transparent;

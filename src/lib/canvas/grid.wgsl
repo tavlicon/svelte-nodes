@@ -56,40 +56,24 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
   let screenPos = in.uv * viewport; // Screen position in device pixels
   let worldPos = screenPos / effectiveZoom - vec2f(cameraX, cameraY);
   
-  // Grid spacing - adjusts based on zoom level
-  let baseSpacing = 40.0;
-  var spacing = baseSpacing;
-  
-  // Adjust grid density based on zoom
-  if (zoom < 0.3) {
-    spacing = baseSpacing * 4.0;
-  } else if (zoom < 0.6) {
-    spacing = baseSpacing * 2.0;
-  } else if (zoom > 2.0) {
-    spacing = baseSpacing * 0.5;
-  }
+  // Fixed grid spacing like Flora - no adaptive changes
+  let spacing = 50.0;
   
   // Calculate distance to nearest grid point
   let gridPos = worldPos / spacing;
   let nearest = round(gridPos) * spacing;
   let dist = length(worldPos - nearest);
   
-  // Dot size (in world units, scales with zoom)
-  let dotRadius = 1.5;
-  let smoothness = 0.5;
+  // Very small dots like Flora (~1px on screen regardless of zoom)
+  let dotRadius = 1.0 / zoom;
+  let smoothness = 0.3 / zoom;
   
   // Anti-aliased dot
-  let alpha = 1.0 - smoothstep(dotRadius - smoothness, dotRadius + smoothness, dist * zoom);
+  let alpha = 1.0 - smoothstep(dotRadius - smoothness, dotRadius + smoothness, dist);
   
-  // Dot color from theme
-  let dotColor = gridConfig.dotColor.rgb;
-  let baseAlpha = gridConfig.dotColor.a;
+  // Subtle gray color like Flora
+  let dotColor = vec3f(0.5, 0.5, 0.5);
   
-  // Fade dots at extreme zoom levels for cleaner look
-  var fadeAlpha = 1.0;
-  if (zoom < 0.2) {
-    fadeAlpha = smoothstep(0.1, 0.2, zoom);
-  }
-  
-  return vec4f(dotColor, alpha * baseAlpha * fadeAlpha);
+  // Very subtle opacity
+  return vec4f(dotColor, alpha * 0.2);
 }

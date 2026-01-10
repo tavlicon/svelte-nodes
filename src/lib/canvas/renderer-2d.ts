@@ -158,11 +158,10 @@ export class Canvas2DRenderer {
       }
     });
     
-    // Draw ports for all nodes (including image/model nodes since they need ports)
+    // Draw ports only for hovered nodes (not selected) - ports fade in on hover only
     nodes.forEach((node) => {
-      const isSelected = selectedIds.has(node.id);
       const isHovered = this.hoveredNodeId === node.id;
-      this.drawPorts(ctx, node, isSelected || isHovered);
+      this.drawPorts(ctx, node, isHovered);
     });
     
     ctx.restore();
@@ -172,15 +171,8 @@ export class Canvas2DRenderer {
   }
   
   private drawGrid(ctx: CanvasRenderingContext2D, camera: Camera) {
-    // Adaptive grid spacing based on zoom
-    let spacing = 40;
-    if (camera.zoom < 0.3) {
-      spacing = 160;
-    } else if (camera.zoom < 0.6) {
-      spacing = 80;
-    } else if (camera.zoom > 2) {
-      spacing = 20;
-    }
+    // Fixed spacing like Flora - no adaptive changes for visual consistency
+    const spacing = 50;
     
     // Calculate visible area in world coordinates (top-left anchored)
     const viewportW = this.width / camera.zoom;
@@ -190,18 +182,13 @@ export class Canvas2DRenderer {
     const startY = Math.floor(-camera.y / spacing) * spacing;
     const endY = Math.ceil((-camera.y + viewportH) / spacing) * spacing;
     
-    // Dot size
-    const dotRadius = 1.5;
+    // Very small dots like Flora (~1px on screen)
+    const dotRadius = 1 / camera.zoom;
     
-    // Fade factor
-    let alpha = 0.4;
-    if (camera.zoom < 0.3) {
-      alpha = 0.2;
-    } else if (camera.zoom > 2) {
-      alpha = 0.6;
-    }
+    // Subtle opacity like Flora
+    const alpha = 0.2;
     
-    // Use theme color
+    // Use subtle gray color
     ctx.fillStyle = `rgba(128, 128, 128, ${alpha})`;
     
     // Draw dots
@@ -334,13 +321,16 @@ export class Canvas2DRenderer {
   }
   
   private drawPorts(ctx: CanvasRenderingContext2D, node: NodeInstance, showHandles: boolean = false) {
+    // Only draw ports when hovering (showHandles indicates hover state)
+    if (!showHandles) return;
+    
     const positions = getPortPositions(node);
     if (positions.length === 0) return;
     
     const portRadius = PORT_HANDLE_RADIUS;
     
     positions.forEach((port) => {
-      const { x, y, type, isOutput } = port;
+      const { x, y, type } = port;
       
       // Draw port background/ring
       ctx.fillStyle = this.theme.bgPrimary;
@@ -348,9 +338,8 @@ export class Canvas2DRenderer {
       ctx.arc(x, y, portRadius + 2, 0, Math.PI * 2);
       ctx.fill();
       
-      // Draw port fill
-      const portColor = showHandles ? '#ffffff' : this.getPortColor(type);
-      ctx.fillStyle = portColor;
+      // Draw port fill with type color
+      ctx.fillStyle = this.getPortColor(type);
       ctx.beginPath();
       ctx.arc(x, y, portRadius, 0, Math.PI * 2);
       ctx.fill();

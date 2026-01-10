@@ -101,11 +101,19 @@
   // Default node size for image resizing
   const NODE_SIZE = 200;
   
+  // Click-to-add offset counter - tracks where to place next clicked item
+  let clickAddOffset = $state(0);
+  const CLICK_ADD_OFFSET_INCREMENT = 30; // Pixels to offset each new item diagonally
+  
   onMount(() => {
     initRenderer();
     // Use capture phase to intercept before browser handles ⌘Z
     document.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('keyup', handleKeyUp);
+    
+    // Listen for sidebar click-to-add events
+    window.addEventListener('sidebar-add-image', handleSidebarAddImage as EventListener);
+    window.addEventListener('sidebar-add-model', handleSidebarAddModel as EventListener);
     
     // Add test nodes on load for debugging (enable via URL param: ?test=1)
     if (typeof window !== 'undefined' && window.location.search.includes('test=1')) {
@@ -166,6 +174,8 @@
     renderer?.destroy();
     document.removeEventListener('keydown', handleKeyDown, true);
     window.removeEventListener('keyup', handleKeyUp);
+    window.removeEventListener('sidebar-add-image', handleSidebarAddImage as EventListener);
+    window.removeEventListener('sidebar-add-model', handleSidebarAddModel as EventListener);
   });
   
   async function initRenderer() {
@@ -1104,6 +1114,52 @@
     graphStore.selectNode(newId, false);
   }
   
+  // Calculate the center of the visible canvas in world coordinates
+  function getVisibleCenterWorld(): { x: number; y: number } {
+    const cam = graphStore.camera;
+    const viewport = renderer?.getViewportSize() ?? { width: canvasWidth, height: canvasHeight };
+    
+    // Convert screen center to world coordinates (top-left anchored)
+    const centerScreenX = viewport.width / 2;
+    const centerScreenY = viewport.height / 2;
+    const centerWorldX = centerScreenX / cam.zoom - cam.x;
+    const centerWorldY = centerScreenY / cam.zoom - cam.y;
+    
+    return { x: centerWorldX, y: centerWorldY };
+  }
+  
+  // Handle sidebar click-to-add image event
+  async function handleSidebarAddImage(e: CustomEvent) {
+    const { path, name } = e.detail;
+    
+    // Calculate position at center of visible canvas with offset
+    const center = getVisibleCenterWorld();
+    const worldX = center.x + clickAddOffset - NODE_SIZE / 2;
+    const worldY = center.y + clickAddOffset - NODE_SIZE / 2;
+    
+    // Increment offset for next item
+    clickAddOffset += CLICK_ADD_OFFSET_INCREMENT;
+    
+    // Add the image node
+    await addImageNodeFromPath(path, name, worldX, worldY, 0);
+  }
+  
+  // Handle sidebar click-to-add model event
+  function handleSidebarAddModel(e: CustomEvent) {
+    const { path, name, type, size } = e.detail;
+    
+    // Calculate position at center of visible canvas with offset
+    const center = getVisibleCenterWorld();
+    const worldX = center.x + clickAddOffset - NODE_SIZE / 2;
+    const worldY = center.y + clickAddOffset - NODE_SIZE / 2;
+    
+    // Increment offset for next item
+    clickAddOffset += CLICK_ADD_OFFSET_INCREMENT;
+    
+    // Add the model node
+    addModelNode(path, name, type, size, worldX, worldY);
+  }
+  
   // Helper function to add an image node from a path
   async function addImageNodeFromPath(
     imagePath: string, 
@@ -1222,6 +1278,7 @@
       y: topLeft.y,
       width: bottomRight.x - topLeft.x,
       height: bottomRight.y - topLeft.y,
+      borderRadius: 12 * graphStore.camera.zoom,
     };
   });
   
@@ -1364,9 +1421,9 @@
       isHighlighted: boolean;
     }> = [];
     
-    // Only calculate ports for nodes that need them
+    // Only calculate ports for nodes that need them (hover only, not selection)
     graphStore.nodes.forEach(node => {
-      const shouldShowPorts = showAllPorts || selectedIds.has(node.id) || hoveredNodeId === node.id;
+      const shouldShowPorts = showAllPorts || hoveredNodeId === node.id;
       
       if (shouldShowPorts) {
         const positions = getPortPositions(node);
@@ -1654,33 +1711,14 @@
   {#if selectionBounds}
     <div
       class="selection-bounds"
-      style={`left: ${selectionBounds.x}px; top: ${selectionBounds.y}px; width: ${selectionBounds.width}px; height: ${selectionBounds.height}px;`}
-    >
-      {#each [
-        { x: 0, y: 0 },
-        { x: 0.5, y: 0 },
-        { x: 1, y: 0 },
-        { x: 0, y: 0.5 },
-        { x: 1, y: 0.5 },
-        { x: 0, y: 1 },
-        { x: 0.5, y: 1 },
-        { x: 1, y: 1 },
-      ] as handle}
-        <div
-          class="selection-handle"
-          style={`left: ${handle.x * 100}%; top: ${handle.y * 100}%; transform: translate(-50%, -50%);`}
-        ></div>
-      {/each}
-    </div>
+      style={`left: ${selectionBounds.x}px; top: ${selectionBounds.y}px; width: ${selectionBounds.width}px; height: ${selectionBounds.height}px; border-radius: ${selectionBounds.borderRadius || 12}px;`}
+    ></div>
   {/if}
   
   <div class="canvas-overlay">
     <div class="zoom-indicator">
       {Math.round(graphStore.camera.zoom * 100)}%
     </div>
-    {#if rendererType === '2d'}
-      <div class="renderer-badge">2D Fallback</div>
-    {/if}
   </div>
   
   {#if isDragOver}
@@ -1851,7 +1889,7 @@
     border-radius: 12px;
     overflow: hidden;
     pointer-events: none;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     background: #1a1a1e;
     user-select: none;
     -webkit-user-select: none;
@@ -1918,7 +1956,7 @@
     border-radius: 12px;
     overflow: hidden;
     pointer-events: none;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%);
     display: flex;
     flex-direction: column;
@@ -2011,13 +2049,13 @@
   
   .selection-bounds {
     position: absolute;
-    z-index: 10;
-    border: 1px solid rgba(255, 255, 255, 0.35);
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15);
+    z-index: 0; /* Below image overlays to prevent border showing over other images */
+    border: 2px solid rgba(255, 255, 255, 0.5);
     pointer-events: none;
   }
   
   .selection-handle {
+    display: none; /* Handles removed for cleaner look */
     position: absolute;
     width: 10px;
     height: 10px;
@@ -2038,16 +2076,6 @@
     border: 1px solid var(--border-subtle);
   }
   
-  .renderer-badge {
-    margin-top: 8px;
-    background: rgba(245, 158, 11, 0.15);
-    padding: 4px 10px;
-    border-radius: var(--radius-sm);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    color: #f59e0b;
-    border: 1px solid rgba(245, 158, 11, 0.3);
-  }
   
   .drop-indicator {
     position: absolute;
