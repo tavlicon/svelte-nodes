@@ -1,10 +1,16 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
   import { theme } from './theme.svelte';
+  import { sidebarState } from './sidebarState.svelte';
   import { listFiles, formatFileSize, type FileInfo } from '../services/file-service';
 
   // Panel state
   let activePanel = $state<'assets' | 'models' | 'canvases' | null>(null);
+  
+  // Sync sidebar state with shared store
+  $effect(() => {
+    sidebarState.isOpen = activePanel !== null;
+  });
 
   function togglePanel(panel: 'assets' | 'models' | 'canvases') {
     if (activePanel === panel) {

@@ -26,9 +26,12 @@
     if (!nodeDef?.parameterMeta) return false;
     return Object.values(nodeDef.parameterMeta).some(meta => meta.group === 'sampler');
   });
+  
+  // Track if panel should be visible (node is selected)
+  let isVisible = $derived(selectedNode !== null && nodeDef !== null);
 </script>
 
-<aside class="node-panel">
+<aside class="node-panel" class:visible={isVisible}>
   {#if selectedNode && nodeDef}
     <header class="panel-header">
       <span class="node-type">{nodeDef.category}</span>
@@ -158,44 +161,29 @@
         </section>
       {/if}
     </div>
-  {:else}
-    <div class="empty-state">
-      <div class="empty-icon">◇</div>
-      <p class="empty-text">Select a node to view its properties</p>
-    </div>
   {/if}
 </aside>
 
 <style>
   .node-panel {
-    width: 300px;
-    min-width: 300px;
+    width: 0;
+    min-width: 0;
     background: var(--bg-secondary);
     border-left: 1px solid var(--border-subtle);
     display: flex;
     flex-direction: column;
     overflow: hidden;
+    /* Fade animation like filename labels */
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease-out, width 180ms ease-out, min-width 180ms ease-out;
   }
   
-  .empty-state {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 32px;
-    color: var(--text-muted);
-  }
-  
-  .empty-icon {
-    font-size: 48px;
-    margin-bottom: 16px;
-    opacity: 0.3;
-  }
-  
-  .empty-text {
-    font-size: 13px;
-    text-align: center;
+  .node-panel.visible {
+    width: 300px;
+    min-width: 300px;
+    opacity: 1;
+    pointer-events: auto;
   }
   
   .panel-header {

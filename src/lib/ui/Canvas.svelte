@@ -5,6 +5,7 @@
   import { getNodesInRect } from '../canvas/interaction';
   import { graphStore, getNodesVersion } from '../graph/store.svelte';
   import { theme } from './theme.svelte';
+  import { sidebarState, ICON_SIDEBAR_WIDTH } from './sidebarState.svelte';
   import { uploadFile } from '../services/file-service';
   import { 
     hitTestPort, 
@@ -1205,13 +1206,22 @@
   }
   
   // Calculate the center of the visible canvas in world coordinates
+  // Accounts for the left sidebar width when open
   function getVisibleCenterWorld(): { x: number; y: number } {
     const cam = graphStore.camera;
     const viewport = renderer?.getViewportSize() ?? { width: canvasWidth, height: canvasHeight };
     
-    // Convert screen center to world coordinates (top-left anchored)
-    const centerScreenX = viewport.width / 2;
+    // Account for sidebar width - the canvas starts at the sidebar edge
+    // but the viewable area is offset by the sidebar width
+    const sidebarWidth = sidebarState.width;
+    
+    // The visible area starts after the sidebar and ends at the right edge
+    // For simplicity, we just offset the center by half the sidebar width
+    // This centers nodes in the viewable area (right of sidebar)
+    const visibleWidth = viewport.width;
+    const centerScreenX = (visibleWidth + sidebarWidth - ICON_SIDEBAR_WIDTH) / 2;
     const centerScreenY = viewport.height / 2;
+    
     const centerWorldX = centerScreenX / cam.zoom - cam.x;
     const centerWorldY = centerScreenY / cam.zoom - cam.y;
     
