@@ -407,6 +407,13 @@ async def img2img(
         logger.error("❌ Model not loaded!")
         raise HTTPException(status_code=503, detail="Model not loaded")
     
+    # Validate parameter combination - ensure at least 1 effective inference step
+    effective_steps = int(steps * denoise)
+    if effective_steps < 1:
+        error_msg = f"Invalid parameter combination: steps={steps} × denoise={denoise} = {effective_steps} effective steps. Need at least 1. Try increasing steps (≥10) or denoise (≥0.1)."
+        logger.error(f"❌ {error_msg}")
+        raise HTTPException(status_code=400, detail=error_msg)
+    
     try:
         # Read and process input image
         logger.info("📷 Processing input image...")
@@ -531,6 +538,12 @@ async def img2img_stream(
     if not model_loaded or pipeline is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
     
+    # Validate parameter combination - ensure at least 1 effective inference step
+    effective_steps = int(steps * denoise)
+    if effective_steps < 1:
+        error_msg = f"Invalid parameter combination: steps={steps} × denoise={denoise} = {effective_steps} effective steps. Need at least 1. Try increasing steps (≥10) or denoise (≥0.1)."
+        raise HTTPException(status_code=400, detail=error_msg)
+    
     request_id = str(uuid.uuid4())
     progress_updates[request_id] = []
     
@@ -654,6 +667,12 @@ async def img2img_base64(
     
     if not model_loaded or pipeline is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
+    
+    # Validate parameter combination - ensure at least 1 effective inference step
+    effective_steps = int(steps * denoise)
+    if effective_steps < 1:
+        error_msg = f"Invalid parameter combination: steps={steps} × denoise={denoise} = {effective_steps} effective steps. Need at least 1. Try increasing steps (≥10) or denoise (≥0.1)."
+        raise HTTPException(status_code=400, detail=error_msg)
     
     try:
         # Decode input image from base64
