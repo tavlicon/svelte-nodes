@@ -415,8 +415,23 @@ async def img2img(
         logger.info(f"  Input size: {input_image.width}x{input_image.height}")
         
         # Resize to target dimensions (must be divisible by 8)
-        width = (input_image.width // 8) * 8
-        height = (input_image.height // 8) * 8
+        # Cap maximum dimension to prevent memory issues (SD 1.5 works best at 512-768)
+        MAX_DIMENSION = 768
+        
+        width = input_image.width
+        height = input_image.height
+        
+        # Scale down if too large while maintaining aspect ratio
+        if width > MAX_DIMENSION or height > MAX_DIMENSION:
+            scale = MAX_DIMENSION / max(width, height)
+            width = int(width * scale)
+            height = int(height * scale)
+            logger.info(f"  Scaling down to fit {MAX_DIMENSION}px max dimension")
+        
+        # Make divisible by 8
+        width = (width // 8) * 8
+        height = (height // 8) * 8
+        
         if width != input_image.width or height != input_image.height:
             input_image = input_image.resize((width, height), Image.Resampling.LANCZOS)
             logger.info(f"  Resized to: {width}x{height}")
@@ -526,8 +541,22 @@ async def img2img_stream(
             input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
             
             # Resize to target dimensions
-            width = (input_image.width // 8) * 8
-            height = (input_image.height // 8) * 8
+            # Cap maximum dimension to prevent memory issues
+            MAX_DIMENSION = 768
+            
+            width = input_image.width
+            height = input_image.height
+            
+            # Scale down if too large while maintaining aspect ratio
+            if width > MAX_DIMENSION or height > MAX_DIMENSION:
+                scale = MAX_DIMENSION / max(width, height)
+                width = int(width * scale)
+                height = int(height * scale)
+            
+            # Make divisible by 8
+            width = (width // 8) * 8
+            height = (height // 8) * 8
+            
             if width != input_image.width or height != input_image.height:
                 input_image = input_image.resize((width, height), Image.Resampling.LANCZOS)
             
@@ -631,8 +660,22 @@ async def img2img_base64(
         input_image = base64_to_image(image_base64).convert("RGB")
         
         # Resize to target dimensions (must be divisible by 8)
-        width = (input_image.width // 8) * 8
-        height = (input_image.height // 8) * 8
+        # Cap maximum dimension to prevent memory issues
+        MAX_DIMENSION = 768
+        
+        width = input_image.width
+        height = input_image.height
+        
+        # Scale down if too large while maintaining aspect ratio
+        if width > MAX_DIMENSION or height > MAX_DIMENSION:
+            scale = MAX_DIMENSION / max(width, height)
+            width = int(width * scale)
+            height = int(height * scale)
+        
+        # Make divisible by 8
+        width = (width // 8) * 8
+        height = (height // 8) * 8
+        
         if width != input_image.width or height != input_image.height:
             input_image = input_image.resize((width, height), Image.Resampling.LANCZOS)
         
