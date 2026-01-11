@@ -92,6 +92,14 @@
             {selectedNode.status}
           </span>
         </div>
+        {#if selectedNode.type === 'output' && selectedNode.params.timeTaken}
+          <div class="status-row" style="margin-top: 6px;">
+            <span class="status-label">Generation Time</span>
+            <span class="status-value time-value">
+              {(selectedNode.params.timeTaken as number / 1000).toFixed(2)}s
+            </span>
+          </div>
+        {/if}
         {#if selectedNode.error}
           <div class="error-message">
             {selectedNode.error}
@@ -205,7 +213,7 @@
   }
   
   .panel-inner {
-    padding: 12px 14px;
+    padding: 12px 14px 24px;
   }
   
   .prompts-section,
@@ -275,6 +283,12 @@
   .status-error {
     color: var(--error);
     background: rgba(239, 68, 68, 0.15);
+  }
+  
+  .time-value {
+    color: var(--accent-primary);
+    background: var(--accent-glow);
+    font-family: var(--font-mono);
   }
   
   .error-message {

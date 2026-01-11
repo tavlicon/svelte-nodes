@@ -149,6 +149,7 @@
       name: file.name,
       type: file.type,
       size: file.size,
+      metadata: file.metadata,
     }));
     
     e.dataTransfer.effectAllowed = 'copy';
@@ -173,6 +174,7 @@
         name: file.name,
         type: file.type,
         size: file.size,
+        metadata: file.metadata,
       }
     }));
   }
@@ -416,7 +418,7 @@
               {#each modelFiles as file (file.name)}
                 <button 
                   class="file-item model-item" 
-                  title={file.name}
+                  title={file.metadata?.description || file.name}
                   aria-label={`Add ${file.name} to canvas`}
                   draggable="true"
                   ondragstart={(e) => handleModelDragStart(e, file)}
@@ -431,11 +433,21 @@
                     </svg>
                   </div>
                   <div class="model-info">
-                    <span class="file-name">{file.name}</span>
+                    <span class="file-name">{file.metadata?.title || file.name}</span>
                     <div class="model-meta">
                       <span class="model-type">{file.type.toUpperCase()}</span>
                       <span class="file-size">{formatFileSize(file.size)}</span>
                     </div>
+                    {#if file.metadata?.hash || file.metadata?.date}
+                      <div class="model-meta-extra">
+                        {#if file.metadata?.hash}
+                          <span class="model-hash" title="SHA256 hash">{file.metadata.hash}</span>
+                        {/if}
+                        {#if file.metadata?.date}
+                          <span class="model-date">{file.metadata.date}</span>
+                        {/if}
+                      </div>
+                    {/if}
                   </div>
                 </button>
               {/each}
@@ -786,6 +798,26 @@
     padding: 2px 6px;
     border-radius: 3px;
     letter-spacing: 0.02em;
+  }
+  
+  .model-meta-extra {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 2px;
+  }
+  
+  .model-hash {
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 10px;
+    color: var(--text-muted);
+    opacity: 0.7;
+  }
+  
+  .model-date {
+    font-size: 10px;
+    color: var(--text-muted);
+    opacity: 0.7;
   }
   
   .model-item[draggable="true"] {

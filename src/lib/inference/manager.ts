@@ -35,6 +35,8 @@ export interface InferenceResult {
   imageUrl: string | null;
   timeTaken: number;
   outputPath?: string; // File path where image was saved
+  width?: number; // Generated image width
+  height?: number; // Generated image height
 }
 
 export interface InferenceProgress {
@@ -351,6 +353,8 @@ class InferenceManager {
         imageUrl: result.image,
         timeTaken: result.time_taken * 1000, // Convert to ms
         outputPath: result.output_path,
+        width: result.width,
+        height: result.height,
       };
       
     } catch (error) {
@@ -434,6 +438,8 @@ class InferenceManager {
         imageUrl: result.image,
         timeTaken: result.time_taken * 1000,
         outputPath: result.output_path,
+        width: result.width,
+        height: result.height,
       };
       
     } catch (error) {

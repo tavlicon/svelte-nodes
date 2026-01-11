@@ -92,7 +92,9 @@ export const nodeRegistry: Record<string, ExtendedNodeDefinition> = {
     inputs: [
       { id: 'image', name: 'Image', type: 'image' },
     ],
-    outputs: [],
+    outputs: [
+      { id: 'image', name: 'Image', type: 'image' }, // Allow chaining to another model
+    ],
     defaultParams: {
       imageUrl: '',
       outputPath: '',

@@ -2,12 +2,24 @@
  * File service for interacting with the data directory API
  */
 
+export interface ModelMetadata {
+  title?: string;
+  hash?: string;
+  date?: string;
+  author?: string;
+  description?: string;
+  architecture?: string;
+  resolution?: string;
+  license?: string;
+}
+
 export interface FileInfo {
   name: string;
   path: string;
   size: number;
   modified: string;
   type: string;
+  metadata?: ModelMetadata; // Safetensors metadata for model files
 }
 
 export type Directory = 'input' | 'output' | 'models' | 'canvases';

@@ -156,17 +156,18 @@
     // Add a model node on the right
     const modelId = graphStore.addNode(
       'model',
-      100, -60,
+      100, -100,
       {
         modelPath: '/data/models/v1-5-pruned-emaonly-fp16.safetensors',
         modelName: 'SD 1.5',
         modelType: 'safetensors',
         modelSize: 2133874944,
+        modelTitle: 'Stable Diffusion v1.5',
         // Add prompts for the test
         positive_prompt: 'a futuristic sneaker, cyberpunk style, neon lights',
         negative_prompt: 'blurry, low quality',
       },
-      200, 120
+      NODE_SIZE, NODE_SIZE
     );
     
     // Connect image output to model image input
@@ -1127,8 +1128,8 @@
     const sidebarModelData = e.dataTransfer?.getData('application/x-sidebar-model');
     if (sidebarModelData) {
       try {
-        const { path, name, type, size } = JSON.parse(sidebarModelData);
-        addModelNode(path, name, type, size, dropWorld.x, dropWorld.y);
+        const { path, name, type, size, metadata } = JSON.parse(sidebarModelData);
+        addModelNode(path, name, type, size, dropWorld.x, dropWorld.y, metadata);
       } catch (error) {
         console.error('Error processing sidebar model drop:', error);
       }
@@ -1181,10 +1182,11 @@
     modelType: string,
     modelSize: number,
     worldX: number,
-    worldY: number
+    worldY: number,
+    metadata?: { title?: string; hash?: string; date?: string; resolution?: string; architecture?: string; license?: string }
   ) {
     const nodeWidth = NODE_SIZE;
-    const nodeHeight = NODE_SIZE * 0.6; // Models are shorter/wider
+    const nodeHeight = NODE_SIZE; // Square shape, same as shortest side of image nodes
     
     const x = worldX - nodeWidth / 2;
     const y = worldY - nodeHeight / 2;
@@ -1198,6 +1200,13 @@
         modelName,
         modelType,
         modelSize,
+        // Metadata from safetensors
+        modelTitle: metadata?.title,
+        modelHash: metadata?.hash,
+        modelDate: metadata?.date,
+        modelResolution: metadata?.resolution,
+        modelArchitecture: metadata?.architecture,
+        modelLicense: metadata?.license,
       },
       nodeWidth,
       nodeHeight
@@ -1256,7 +1265,7 @@
   
   // Handle sidebar click-to-add model event
   function handleSidebarAddModel(e: CustomEvent) {
-    const { path, name, type, size } = e.detail;
+    const { path, name, type, size, metadata } = e.detail;
     
     // Calculate position at center of visible canvas with offset
     const center = getVisibleCenterWorld();
@@ -1266,8 +1275,8 @@
     // Increment offset for next item
     clickAddOffset += CLICK_ADD_OFFSET_INCREMENT;
     
-    // Add the model node
-    addModelNode(path, name, type, size, worldX, worldY);
+    // Add the model node with metadata
+    addModelNode(path, name, type, size, worldX, worldY, metadata);
   }
   
   // Helper function to add an image node from a path
@@ -1442,6 +1451,10 @@
     modelName: string;
     modelType: string;
     modelSize: number;
+    modelTitle?: string;
+    modelArchitecture?: string;
+    modelResolution?: string;
+    modelLicense?: string;
     screenX: number;
     screenY: number;
     screenWidth: number;
@@ -1536,6 +1549,10 @@
           modelName: node.params.modelName as string,
           modelType: node.params.modelType as string,
           modelSize: node.params.modelSize as number,
+          modelTitle: node.params.modelTitle as string | undefined,
+          modelArchitecture: node.params.modelArchitecture as string | undefined,
+          modelResolution: node.params.modelResolution as string | undefined,
+          modelLicense: node.params.modelLicense as string | undefined,
           screenX: topLeft.x,
           screenY: topLeft.y,
           screenWidth: bottomRight.x - topLeft.x,
@@ -1895,18 +1912,21 @@
             </svg>
           </div>
         {:else}
-      <div class="model-node-icon">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M12 2L2 7l10 5 10-5-10-5z" />
-          <path d="M2 17l10 5 10-5" />
-          <path d="M2 12l10 5 10-5" />
-        </svg>
-      </div>
+          <!-- Model metadata content -->
+          <div class="model-metadata-content">
+            <div class="model-meta-line">{model.modelArchitecture || model.modelName || 'model'}</div>
+            <div class="model-meta-line">({model.modelType?.toUpperCase() || 'MODEL'})</div>
+            <div class="model-meta-line">Neural network weights</div>
+            <div class="model-meta-line">Image denoising core</div>
+            <div class="model-meta-line">Encodes/decodes latent space</div>
+            {#if model.modelResolution}
+              <div class="model-meta-line">Resolution ({model.modelResolution})</div>
+            {/if}
+            {#if model.modelLicense}
+              <div class="model-meta-line model-meta-license">{model.modelLicense}</div>
+            {/if}
+          </div>
         {/if}
-      <div class="model-node-info">
-        <span class="model-node-name">{model.modelName}</span>
-          <span class="model-node-type">{model.modelType?.toUpperCase() || 'MODEL'}</span>
-      </div>
         {#if model.status === 'error' && model.error}
           <div class="model-error-badge" title={model.error}>!</div>
         {/if}
@@ -1918,6 +1938,10 @@
           <span class="error-text">{model.error}</span>
         </div>
       {/if}
+      <!-- Model title label - appears below node on hover/selection (like image filename) -->
+      <div class="model-title-label" class:visible={model.isHovered || model.isSelected} style={`max-width: ${model.screenWidth}px;`}>
+        {model.modelTitle || model.modelName}
+      </div>
     </div>
   {/each}
   
@@ -2407,13 +2431,13 @@
     overflow: visible;
     pointer-events: none;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    background: linear-gradient(135deg, #e91e63 0%, #9c27b0 100%);
+    background: linear-gradient(270deg, #373534 0%, #424140 100%);
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 12px;
-    gap: 8px;
+    align-items: flex-start;
+    justify-content: flex-start;
+    padding: 16px;
+    gap: 0;
     user-select: none;
     -webkit-user-select: none;
     border: 2px solid transparent;
@@ -2432,61 +2456,58 @@
   .model-node-overlay.error {
     border-color: #ef4444;
     box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
-    background: linear-gradient(135deg, #dc2626 0%, #7f1d1d 100%);
+    background: linear-gradient(270deg, #4a2020 0%, #5c2828 100%);
   }
   
   .model-node-overlay.complete {
     border-color: #22c55e;
   }
   
-  .model-node-icon {
-    width: 48px;
-    height: 48px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(255, 255, 255, 0.15);
-    border-radius: 12px;
-  }
-  
-  .model-node-icon svg {
-    width: 28px;
-    height: 28px;
-    color: white;
-  }
-  
-  .model-node-info {
+  /* Model metadata content - Kode Mono styling */
+  .model-metadata-content {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    text-align: center;
-    min-width: 0;
+    align-items: flex-start;
+    justify-content: flex-start;
     width: 100%;
+    height: 100%;
+    gap: 0;
   }
   
-  .model-node-name {
-    font-size: 11px;
-    font-weight: 600;
-    color: white;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 100%;
+  .model-meta-line {
+    font-family: 'Kode Mono', 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    font-size: 12px;
+    font-style: normal;
+    font-weight: 400;
+    line-height: 150%;
+    color: var(--60, #999);
     user-select: none;
     -webkit-user-select: none;
   }
   
-  .model-node-type {
-    font-size: 9px;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.7);
-    background: rgba(255, 255, 255, 0.15);
-    padding: 2px 6px;
-    border-radius: 4px;
-    letter-spacing: 0.05em;
-    user-select: none;
-    -webkit-user-select: none;
+  .model-meta-license {
+    margin-top: 8px;
+  }
+  
+  /* Model title label - appears below node on hover/selection */
+  .model-title-label {
+    font-family: 'Kode Mono', 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    font-size: 12px;
+    font-weight: 400;
+    color: rgba(255, 255, 255, 0.65);
+    background: transparent;
+    margin-top: 8px;
+    text-align: left;
+    word-wrap: break-word;
+    overflow-wrap: break-word;
+    hyphens: auto;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 140ms cubic-bezier(0.0, 0, 0.2, 1);
+  }
+  
+  .model-title-label.visible {
+    opacity: 1;
   }
   
   /* Model status indicators */
@@ -2498,6 +2519,7 @@
     justify-content: center;
     background: rgba(255, 255, 255, 0.15);
     border-radius: 12px;
+    margin: auto;
   }
   
   .model-status-indicator.running {

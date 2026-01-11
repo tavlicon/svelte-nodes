@@ -141,7 +141,8 @@
   
   .panel-body {
     flex: 1;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
     display: flex;
     flex-direction: column;
     min-height: 0; /* Important: allows flex child to shrink below content size */

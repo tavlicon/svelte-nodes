@@ -10,6 +10,62 @@ interface FileInfo {
   size: number;
   modified: string;
   type: string;
+  // Safetensors metadata (for model files)
+  metadata?: {
+    title?: string;
+    hash?: string;
+    date?: string;
+    author?: string;
+    description?: string;
+    architecture?: string;
+    resolution?: string;
+    license?: string;
+  };
+}
+
+/**
+ * Read safetensors metadata from file header
+ * Safetensors format: 8-byte little-endian header size, then JSON header
+ */
+async function readSafetensorsMetadata(filePath: string): Promise<FileInfo['metadata']> {
+  try {
+    const handle = await fs.open(filePath, 'r');
+    try {
+      // Read first 8 bytes for header size
+      const sizeBuffer = Buffer.alloc(8);
+      await handle.read(sizeBuffer, 0, 8, 0);
+      const headerSize = Number(sizeBuffer.readBigUInt64LE(0));
+      
+      // Sanity check - header shouldn't be larger than 10MB
+      if (headerSize > 10 * 1024 * 1024) {
+        return undefined;
+      }
+      
+      // Read the JSON header
+      const headerBuffer = Buffer.alloc(headerSize);
+      await handle.read(headerBuffer, 0, headerSize, 8);
+      const header = JSON.parse(headerBuffer.toString('utf-8'));
+      
+      // Extract __metadata__ field if present
+      const meta = header.__metadata__ || {};
+      
+      return {
+        title: meta['modelspec.title'],
+        hash: meta['modelspec.hash_sha256']?.replace('0x', '').slice(0, 12), // First 12 chars
+        date: meta['modelspec.date'],
+        author: meta['modelspec.author'],
+        description: meta['modelspec.description'],
+        architecture: meta['modelspec.architecture'],
+        resolution: meta['modelspec.resolution'],
+        license: meta['modelspec.license'],
+      };
+    } finally {
+      await handle.close();
+    }
+  } catch (error) {
+    console.error('Error reading safetensors metadata:', error);
+    return undefined;
+  }
 }
 
 async function ensureDir(dir: string): Promise<void> {
@@ -49,13 +105,20 @@ async function listFiles(directory: string): Promise<FileInfo[]> {
         
         // Check file type based on directory
         if (allowedExtensions.includes(ext)) {
-          files.push({
+          const fileInfo: FileInfo = {
             name: entry.name,
             path: `/data/${directory}/${entry.name}`,
             size: stats.size,
             modified: stats.mtime.toISOString(),
             type: ext.slice(1),
-          });
+          };
+          
+          // Extract metadata for safetensors files
+          if (ext === '.safetensors') {
+            fileInfo.metadata = await readSafetensorsMetadata(filePath);
+          }
+          
+          files.push(fileInfo);
         }
       }
     }

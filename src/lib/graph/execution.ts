@@ -196,8 +196,9 @@ class ExecutionEngine {
           break;
           
         case 'output':
-          // Output node receives the image and displays it
-          // Update thumbnail with the received image
+          // Output node receives and displays the image, AND outputs it for chaining
+          // This allows output nodes to connect to model nodes for iterative generation
+          const outputImageUrl = (inputs.image as string) || node.params.imageUrl || node.thumbnailUrl || '';
           if (inputs.image) {
             graphStore.updateNode(nodeId, {
               thumbnailUrl: inputs.image as string,
@@ -207,7 +208,8 @@ class ExecutionEngine {
               },
             });
           }
-          outputs = {};
+          // Output the image so it can chain to another model
+          outputs = { image: outputImageUrl };
           break;
           
         default:
@@ -224,6 +226,17 @@ class ExecutionEngine {
       const execNode = this.executionGraph.get(nodeId);
       if (execNode) {
         execNode.dirty = false;
+      }
+      
+      // For model nodes: after 1 second, reset to idle and select the output node
+      if (node.type === 'model' && outputs._outputNodeId) {
+        const outputNodeId = outputs._outputNodeId as string;
+        setTimeout(() => {
+          // Reset model node to idle state
+          graphStore.updateNode(nodeId, { status: 'idle' });
+          // Select the output node
+          graphStore.selectNode(outputNodeId, false);
+        }, 1000);
       }
       
     } catch (error) {
@@ -367,19 +380,20 @@ class ExecutionEngine {
     }
     
     // Create or update output node
-    this.createOrUpdateOutputNode(node, result);
+    const outputNodeId = this.createOrUpdateOutputNode(node, result);
     
-    return { image: result.imageUrl || result.imageData };
+    return { image: result.imageUrl || result.imageData, _outputNodeId: outputNodeId };
   }
   
   /**
    * Create a new output node for each generation (no wire connection)
    * Stacks outputs vertically below previous ones
+   * Returns the output node ID
    */
   private createOrUpdateOutputNode(
     modelNode: NodeInstance,
-    result: { imageUrl: string | null; outputPath?: string; timeTaken: number }
-  ) {
+    result: { imageUrl: string | null; outputPath?: string; timeTaken: number; width?: number; height?: number }
+  ): string {
     // Extract generation parameters from model node
     const generationParams = {
       prompt: modelNode.params.positive_prompt as string || '',
@@ -397,8 +411,26 @@ class ExecutionEngine {
     // This allows us to stack below the lowest one
     const modelNodeWidth = modelNode.width || 200;
     const modelNodeHeight = modelNode.height || 200;
-    const outputNodeWidth = 200; // Default output node width
-    const outputNodeHeight = 200; // Default output node height
+    
+    // Calculate output node size based on actual image dimensions (maintain aspect ratio)
+    // Match the input image node sizing logic so they appear the same size
+    const BASE_OUTPUT_SIZE = 200;
+    const imgWidth = result.width || 512;
+    const imgHeight = result.height || 512;
+    const aspectRatio = imgWidth / imgHeight;
+    
+    let outputNodeWidth: number;
+    let outputNodeHeight: number;
+    
+    if (imgHeight > imgWidth) {
+      // Portrait - width matches base, height grows
+      outputNodeWidth = BASE_OUTPUT_SIZE;
+      outputNodeHeight = Math.round(BASE_OUTPUT_SIZE / aspectRatio);
+    } else {
+      // Landscape or square - height matches base, width grows
+      outputNodeHeight = BASE_OUTPUT_SIZE;
+      outputNodeWidth = Math.round(BASE_OUTPUT_SIZE * aspectRatio);
+    }
     
     // Position output to the RIGHT of the model node
     const outputX = modelNode.x + modelNodeWidth + 40; // 40px gap to the right
@@ -425,18 +457,22 @@ class ExecutionEngine {
       outputY = lowestOutput.y + lowestOutputHeight + 20; // 20px gap between outputs
     }
     
-    // Always create a new output node (no wire connection)
+    // Always create a new output node (no wire connection) with proper dimensions
     const outputNodeId = graphStore.addNode('output', outputX, outputY, {
       imageUrl: result.imageUrl || '',
       outputPath: result.outputPath || '',
       timeTaken: Math.round(result.timeTaken),
       generationParams,
-    });
+      imageWidth: imgWidth,
+      imageHeight: imgHeight,
+    }, outputNodeWidth, outputNodeHeight);
     
     // Set thumbnail - must be set separately as it's a top-level property
     graphStore.updateNode(outputNodeId, {
       thumbnailUrl: result.imageUrl || '',
     });
+    
+    return outputNodeId;
   }
   
   /**
