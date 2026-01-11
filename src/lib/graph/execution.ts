@@ -373,7 +373,8 @@ class ExecutionEngine {
   }
   
   /**
-   * Create or update an output node connected to a model node
+   * Create a new output node for each generation (no wire connection)
+   * Stacks outputs vertically below previous ones
    */
   private createOrUpdateOutputNode(
     modelNode: NodeInstance,
@@ -392,46 +393,50 @@ class ExecutionEngine {
       modelName: modelNode.params.modelName as string || 'SD 1.5',
     };
     
-    // Look for existing output node connected to this model
-    const existingOutputEdge = Array.from(graphStore.edges.values()).find(
-      edge => edge.sourceNodeId === modelNode.id && 
-              graphStore.getNodeById(edge.targetNodeId)?.type === 'output'
-    );
+    // Find all existing output nodes to the right of the model
+    // This allows us to stack below the lowest one
+    const modelNodeWidth = modelNode.width || 200;
+    const modelNodeHeight = modelNode.height || 200;
+    const outputNodeWidth = 200; // Default output node width
+    const outputNodeHeight = 200; // Default output node height
     
-    if (existingOutputEdge) {
-      // Update existing output node
-      const outputNodeId = existingOutputEdge.targetNodeId;
-      graphStore.updateNode(outputNodeId, {
-        thumbnailUrl: result.imageUrl || '',
-        params: {
-          imageUrl: result.imageUrl || '',
-          outputPath: result.outputPath || '',
-          timeTaken: Math.round(result.timeTaken),
-          generationParams,
-        },
-      });
+    // Position output to the RIGHT of the model node
+    const outputX = modelNode.x + modelNodeWidth + 40; // 40px gap to the right
+    
+    // Vertical center of model node
+    const modelCenterY = modelNode.y + (modelNodeHeight / 2);
+    
+    // Find output nodes that are to the right of the model (within the output column)
+    const outputNodes = Array.from(graphStore.nodes.values())
+      .filter(node => node.type === 'output')
+      .filter(node => node.x >= modelNode.x + modelNodeWidth) // To the right of model
+      .sort((a, b) => (a.y + (a.height || 200)) - (b.y + (b.height || 200))); // Sort by bottom edge
+    
+    // Calculate Y position - align vertical center with model, or stack below previous outputs
+    let outputY: number;
+    
+    if (outputNodes.length === 0) {
+      // First output - vertically center with model node
+      outputY = modelCenterY - (outputNodeHeight / 2);
     } else {
-      // Create new output node positioned to the right of the model node
-      const outputNodeId = graphStore.addNode('output', modelNode.x + 250, modelNode.y, {
-        imageUrl: result.imageUrl || '',
-        outputPath: result.outputPath || '',
-        timeTaken: Math.round(result.timeTaken),
-        generationParams,
-      });
-      
-      // Set thumbnail
-      graphStore.updateNode(outputNodeId, {
-        thumbnailUrl: result.imageUrl || '',
-      });
-      
-      // Connect model output to output node input
-      graphStore.addEdge(
-        modelNode.id,
-        'image',
-        outputNodeId,
-        'image'
-      );
+      // Stack below the lowest output node (by bottom edge) with a small gap
+      const lowestOutput = outputNodes[outputNodes.length - 1];
+      const lowestOutputHeight = lowestOutput.height || 200;
+      outputY = lowestOutput.y + lowestOutputHeight + 20; // 20px gap between outputs
     }
+    
+    // Always create a new output node (no wire connection)
+    const outputNodeId = graphStore.addNode('output', outputX, outputY, {
+      imageUrl: result.imageUrl || '',
+      outputPath: result.outputPath || '',
+      timeTaken: Math.round(result.timeTaken),
+      generationParams,
+    });
+    
+    // Set thumbnail - must be set separately as it's a top-level property
+    graphStore.updateNode(outputNodeId, {
+      thumbnailUrl: result.imageUrl || '',
+    });
   }
   
   /**

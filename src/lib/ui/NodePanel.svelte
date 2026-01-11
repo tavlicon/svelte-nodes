@@ -2,6 +2,7 @@
   import { graphStore } from '../graph/store.svelte';
   import { nodeRegistry, type ExtendedNodeDefinition } from '../graph/nodes/registry';
   import ParameterEditor from './ParameterEditor.svelte';
+  import Panel from './Panel.svelte';
   
   // Get first selected node
   let selectedNode = $derived.by(() => {
@@ -29,16 +30,28 @@
   
   // Track if panel should be visible (node is selected)
   let isVisible = $derived(selectedNode !== null && nodeDef !== null);
+  
+  function handleClose() {
+    graphStore.deselectAll();
+  }
 </script>
 
-<aside class="node-panel" class:visible={isVisible}>
+<aside class="node-panel-container">
+  <Panel 
+    visible={isVisible} 
+    width={300} 
+    position="right"
+    onclose={handleClose}
+  >
+    {#snippet header()}
   {#if selectedNode && nodeDef}
-    <header class="panel-header">
       <span class="node-type">{nodeDef.category}</span>
       <h2 class="node-name">{nodeDef.name}</h2>
-    </header>
+      {/if}
+    {/snippet}
     
-    <div class="panel-content">
+    {#if selectedNode && nodeDef}
+      <div class="panel-inner">
       {#if hasPrompts}
         <section class="prompts-section">
           <h3 class="section-title">Conditioning</h3>
@@ -100,95 +113,79 @@
           <h3 class="section-title">Output Location</h3>
           <div class="output-path">
             <code class="path-text">{selectedNode.params.outputPath}</code>
-          </div>
-        </section>
-      {/if}
-      
-      {#if selectedNode.type === 'output' && selectedNode.params.generationParams}
-        {@const params = selectedNode.params.generationParams as Record<string, unknown>}
-        <section class="output-section">
-          <h3 class="section-title">Generation Settings</h3>
-          <div class="generation-params">
-            <div class="params-grid">
-              {#if params.prompt}
-                <div class="param-item full-width">
-                  <span class="param-key">Prompt</span>
-                </div>
-                <div class="param-item full-width" style="margin-bottom: 4px;">
-                  <span class="param-val prompt" title={params.prompt as string}>{params.prompt}</span>
-                </div>
-              {/if}
-              {#if params.negativePrompt}
-                <div class="param-item full-width">
-                  <span class="param-key">Negative</span>
-                </div>
-                <div class="param-item full-width" style="margin-bottom: 4px;">
-                  <span class="param-val prompt" title={params.negativePrompt as string}>{params.negativePrompt}</span>
-                </div>
-              {/if}
-              <div class="param-item">
-                <span class="param-key">Steps</span>
-                <span class="param-val">{params.steps}</span>
-              </div>
-              <div class="param-item">
-                <span class="param-key">CFG</span>
-                <span class="param-val">{params.cfg}</span>
-              </div>
-              <div class="param-item">
-                <span class="param-key">Denoise</span>
-                <span class="param-val">{params.denoise}</span>
-              </div>
-              <div class="param-item">
-                <span class="param-key">Seed</span>
-                <span class="param-val">{params.seed}</span>
-              </div>
-              <div class="param-item">
-                <span class="param-key">Sampler</span>
-                <span class="param-val">{params.sampler}</span>
-              </div>
-              <div class="param-item">
-                <span class="param-key">Scheduler</span>
-                <span class="param-val">{params.scheduler}</span>
-              </div>
-              {#if selectedNode.params.timeTaken}
-                <div class="param-item full-width" style="margin-top: 4px; border-top: 1px solid var(--border-subtle); padding-top: 4px;">
-                  <span class="param-key">Time</span>
-                  <span class="param-val">{(selectedNode.params.timeTaken as number / 1000).toFixed(2)}s</span>
-                </div>
-              {/if}
             </div>
+          </section>
+        {/if}
+        
+        {#if selectedNode.type === 'output' && selectedNode.params.generationParams}
+          {@const params = selectedNode.params.generationParams as Record<string, unknown>}
+          <section class="output-section">
+            <h3 class="section-title">Generation Settings</h3>
+            <div class="generation-params">
+              <div class="params-grid">
+                {#if params.prompt}
+                  <div class="param-item full-width">
+                    <span class="param-key">Prompt</span>
+                  </div>
+                  <div class="param-item full-width" style="margin-bottom: 4px;">
+                    <span class="param-val prompt" title={params.prompt as string}>{params.prompt}</span>
+                  </div>
+                {/if}
+                {#if params.negativePrompt}
+                  <div class="param-item full-width">
+                    <span class="param-key">Negative</span>
+                  </div>
+                  <div class="param-item full-width" style="margin-bottom: 4px;">
+                    <span class="param-val prompt" title={params.negativePrompt as string}>{params.negativePrompt}</span>
+                  </div>
+                {/if}
+                <div class="param-item">
+                  <span class="param-key">Steps</span>
+                  <span class="param-val">{params.steps}</span>
+                </div>
+                <div class="param-item">
+                  <span class="param-key">CFG</span>
+                  <span class="param-val">{params.cfg}</span>
+                </div>
+                <div class="param-item">
+                  <span class="param-key">Denoise</span>
+                  <span class="param-val">{params.denoise}</span>
+                </div>
+                <div class="param-item">
+                  <span class="param-key">Seed</span>
+                  <span class="param-val">{params.seed}</span>
+                </div>
+                <div class="param-item">
+                  <span class="param-key">Sampler</span>
+                  <span class="param-val">{params.sampler}</span>
+                </div>
+                <div class="param-item">
+                  <span class="param-key">Scheduler</span>
+                  <span class="param-val">{params.scheduler}</span>
           </div>
+          {#if selectedNode.params.timeTaken}
+                  <div class="param-item full-width" style="margin-top: 4px; border-top: 1px solid var(--border-subtle); padding-top: 4px;">
+                    <span class="param-key">Time</span>
+                    <span class="param-val">{(selectedNode.params.timeTaken as number / 1000).toFixed(2)}s</span>
+                  </div>
+                {/if}
+              </div>
+            </div>
         </section>
       {/if}
     </div>
   {/if}
+  </Panel>
 </aside>
 
 <style>
-  .node-panel {
-    width: 0;
-    min-width: 0;
-    background: var(--bg-secondary);
-    border-left: 1px solid var(--border-subtle);
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    /* Fade animation like filename labels */
-    opacity: 0;
+  .node-panel-container {
+    position: absolute;
+    right: 12px;
+    top: 12px;
+    bottom: 36px;
+    z-index: 50;
     pointer-events: none;
-    transition: opacity 180ms ease-out, width 180ms ease-out, min-width 180ms ease-out;
-  }
-  
-  .node-panel.visible {
-    width: 300px;
-    min-width: 300px;
-    opacity: 1;
-    pointer-events: auto;
-  }
-  
-  .panel-header {
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--border-subtle);
   }
   
   .node-type {
@@ -197,17 +194,17 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--accent-primary);
+    display: block;
   }
   
   .node-name {
     font-size: 15px;
     font-weight: 600;
     margin-top: 2px;
+    color: var(--text-primary);
   }
   
-  .panel-content {
-    flex: 1;
-    overflow-y: auto;
+  .panel-inner {
     padding: 12px 14px;
   }
   

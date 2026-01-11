@@ -21,10 +21,23 @@
   
   let isExecuting = $state(false);
   let lastExecutionError = $state<string | null>(null);
+  let showErrorToast = $state(false);
+  let errorToastTimeout: ReturnType<typeof setTimeout> | null = null;
   
   // Check backend status on mount
   $effect(() => {
     checkBackendStatus();
+  });
+  
+  // Auto-hide error toast after 10 seconds
+  $effect(() => {
+    if (lastExecutionError) {
+      showErrorToast = true;
+      if (errorToastTimeout) clearTimeout(errorToastTimeout);
+      errorToastTimeout = setTimeout(() => {
+        showErrorToast = false;
+      }, 10000);
+    }
   });
   
   async function checkBackendStatus() {
@@ -44,19 +57,41 @@
     }
   }
   
+  function clearError() {
+    lastExecutionError = null;
+    showErrorToast = false;
+    if (errorToastTimeout) {
+      clearTimeout(errorToastTimeout);
+      errorToastTimeout = null;
+    }
+  }
+  
   async function handleRunGraph() {
     if (isExecuting) return;
+    
+    // Check backend status before running
+    await checkBackendStatus();
+    
+    // Warn if backend is not available
+    if (!backendStatus.available || !backendStatus.modelLoaded) {
+      lastExecutionError = 'Backend server not available. Please start the backend server in terminal: cd backend && source venv/bin/activate && python server.py';
+      console.warn('⚠️ Backend not ready:', backendStatus);
+      return;
+    }
+    
     isExecuting = true;
     lastExecutionError = null;
+    showErrorToast = false;
+    
     try {
       const result = await executionEngine.execute();
       if (!result.success && result.error) {
         lastExecutionError = result.error;
-        console.error('Pipeline execution failed:', result.error);
+        console.error('❌ Pipeline execution failed:', result.error);
       }
     } catch (error) {
       lastExecutionError = error instanceof Error ? error.message : String(error);
-      console.error('Pipeline execution error:', lastExecutionError);
+      console.error('❌ Pipeline execution error:', lastExecutionError);
     } finally {
       isExecuting = false;
     }
@@ -217,28 +252,32 @@
     <div class="separator"></div>
     
     <button 
-      class="toolbar-btn run-btn"
+      class="generate-btn"
       class:error={lastExecutionError !== null}
       onclick={handleRunGraph}
       disabled={isExecuting || graphStore.nodes.size === 0}
-      title={lastExecutionError ? `Last error: ${lastExecutionError}` : 'Run the graph'}
+      title={lastExecutionError ? `Last error: ${lastExecutionError}` : 'Generate'}
     >
       {#if isExecuting}
-        <span class="spinner"></span>
-        Running...
+        <span class="spinner spinner-dark"></span>
+        Generating...
       {:else if lastExecutionError}
         <span class="icon">⚠️</span>
         Error
       {:else}
-        <span class="icon">▶</span>
-        Run
+        <svg class="ai-icon" width="16" height="17" viewBox="0 0 16 17" fill="none">
+          <path d="M6.43464 3.35631L6.8932 4.63055C7.40321 6.04478 8.51676 7.15826 9.93099 7.66822L11.2053 8.12677C11.3203 8.1682 11.3203 8.33105 11.2053 8.37248L9.93099 8.83103C8.51671 9.34102 7.40319 10.4545 6.8932 11.8687L6.43464 13.1429C6.39321 13.2579 6.23035 13.2579 6.18891 13.1429L5.73035 11.8687C5.22035 10.4545 4.10679 9.341 2.69257 8.83103L1.41828 8.37248C1.30328 8.33106 1.30328 8.1682 1.41828 8.12677L2.69257 7.66822C4.10685 7.15824 5.22036 6.04472 5.73035 4.63055L6.18891 3.35631C6.23034 3.2406 6.3932 3.2406 6.43464 3.35631Z" fill="currentColor"/>
+          <path d="M12.1706 0.294462L12.4034 0.939426C12.662 1.65512 13.2255 2.21937 13.942 2.47794L14.587 2.71078C14.6455 2.7322 14.6455 2.81434 14.587 2.83506L13.942 3.0679C13.2263 3.32646 12.662 3.89 12.4034 4.60641L12.1706 5.25137C12.1491 5.30994 12.067 5.30994 12.0463 5.25137L11.8134 4.60641C11.5548 3.89072 10.9913 3.32646 10.2749 3.0679L9.62987 2.83506C9.57129 2.81363 9.57129 2.73149 9.62987 2.71078L10.2749 2.47794C10.9906 2.21937 11.5548 1.65583 11.8134 0.939426L12.0463 0.294462C12.067 0.235179 12.1498 0.235179 12.1706 0.294462Z" fill="currentColor"/>
+          <path d="M12.1706 11.251L12.4034 11.8959C12.662 12.6116 13.2255 13.1759 13.942 13.4344L14.587 13.6673C14.6455 13.6887 14.6455 13.7708 14.587 13.7916L13.942 14.0244C13.2263 14.283 12.662 14.8465 12.4034 15.5629L12.1706 16.2079C12.1491 16.2664 12.067 16.2664 12.0463 16.2079L11.8134 15.5629C11.5548 14.8472 10.9913 14.283 10.2749 14.0244L9.62987 13.7916C9.57129 13.7701 9.57129 13.688 9.62987 13.6673L10.2749 13.4344C10.9906 13.1759 11.5548 12.6123 11.8134 11.8959L12.0463 11.251C12.067 11.1924 12.1498 11.1924 12.1706 11.251Z" fill="currentColor"/>
+        </svg>
+        Generate
       {/if}
     </button>
     
     {#if lastExecutionError}
       <button 
         class="toolbar-btn clear-error"
-        onclick={() => lastExecutionError = null}
+        onclick={clearError}
         title="Clear error"
       >
         ✕
@@ -312,6 +351,31 @@
     </button>
   </div>
 </header>
+
+<!-- Error Toast Notification -->
+{#if showErrorToast && lastExecutionError}
+  <div class="error-toast">
+    <div class="error-toast-content">
+      <div class="error-toast-header">
+        <span class="error-icon">⚠️</span>
+        <span class="error-title">Pipeline Error</span>
+        <button class="error-close" onclick={clearError}>✕</button>
+      </div>
+      <div class="error-message">{lastExecutionError}</div>
+      {#if !backendStatus.available || !backendStatus.modelLoaded}
+        <div class="error-help">
+          <strong>How to fix:</strong>
+          <ol>
+            <li>Open a new terminal</li>
+            <li>Navigate to the backend directory: <code>cd backend</code></li>
+            <li>Activate virtual environment: <code>source venv/bin/activate</code></li>
+            <li>Start the server: <code>python server.py</code></li>
+          </ol>
+        </div>
+      {/if}
+    </div>
+  </div>
+{/if}
 
 <style>
   .toolbar {
@@ -498,32 +562,57 @@
     font-family: system-ui, -apple-system, sans-serif;
   }
   
-  /* Run button */
-  .run-btn {
-    background: #10b981;
-    border-color: #10b981;
+  /* Generate button - pill style */
+  .generate-btn {
+    display: inline-flex;
+    height: 40px;
+    padding: 8px 20px 8px 14px;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    border-radius: 100px;
+    background: var(--bb-volt-85, #DCFDB5);
+    border: none;
+    color: #111111;
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    font-weight: 400;
+    letter-spacing: -0.01em;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  
+  .generate-btn:hover:not(:disabled) {
+    background: var(--bb-volt-75, #c9f59a);
+  }
+  
+  .generate-btn:active:not(:disabled) {
+    transform: scale(0.98);
+  }
+  
+  .generate-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  
+  .generate-btn.error {
+    background: #ef4444;
     color: white;
   }
   
-  .run-btn:hover:not(:disabled) {
-    background: #059669;
-    border-color: #059669;
-  }
-  
-  .run-btn:disabled {
-    background: var(--bg-tertiary);
-    border-color: var(--border-subtle);
-    color: var(--text-muted);
-  }
-  
-  .run-btn.error {
-    background: #ef4444;
-    border-color: #ef4444;
-  }
-  
-  .run-btn.error:hover:not(:disabled) {
+  .generate-btn.error:hover:not(:disabled) {
     background: #dc2626;
-    border-color: #dc2626;
+  }
+  
+  .ai-icon {
+    width: 16px;
+    height: 17px;
+    flex-shrink: 0;
+  }
+  
+  .spinner-dark {
+    border-color: rgba(0, 0, 0, 0.2);
+    border-top-color: #111111;
   }
   
   .clear-error {
@@ -595,5 +684,113 @@
   
   .backend-status.connected .status-text {
     color: #10b981;
+  }
+  
+  /* Error Toast Notification */
+  .error-toast {
+    position: fixed;
+    top: 72px;
+    right: 20px;
+    max-width: 500px;
+    z-index: 1000;
+    animation: slideIn 0.3s ease-out;
+  }
+  
+  @keyframes slideIn {
+    from {
+      transform: translateX(100%);
+      opacity: 0;
+    }
+    to {
+      transform: translateX(0);
+      opacity: 1;
+    }
+  }
+  
+  .error-toast-content {
+    background: var(--bg-elevated);
+    border: 2px solid #ef4444;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xl);
+    overflow: hidden;
+  }
+  
+  .error-toast-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    background: #ef4444;
+    color: white;
+  }
+  
+  .error-icon {
+    font-size: 18px;
+  }
+  
+  .error-title {
+    flex: 1;
+    font-weight: 600;
+    font-size: 14px;
+  }
+  
+  .error-close {
+    background: none;
+    border: none;
+    color: white;
+    font-size: 18px;
+    cursor: pointer;
+    padding: 0;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: var(--radius-sm);
+    transition: background 0.15s ease;
+  }
+  
+  .error-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  
+  .error-message {
+    padding: 16px;
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.5;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  
+  .error-help {
+    padding: 16px;
+    background: var(--bg-secondary);
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  
+  .error-help strong {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+  }
+  
+  .error-help ol {
+    margin: 0;
+    padding-left: 20px;
+  }
+  
+  .error-help li {
+    margin: 4px 0;
+    color: var(--text-secondary);
+  }
+  
+  .error-help code {
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    font-size: 12px;
+    color: var(--accent-primary);
   }
 </style>

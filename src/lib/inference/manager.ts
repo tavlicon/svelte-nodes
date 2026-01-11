@@ -73,6 +73,23 @@ class InferenceManager {
       const response = await fetch(`${BACKEND_URL}/api/model/info`);
       if (response.ok) {
         const data = await response.json();
+
+        // #region agent log
+        fetch('http://127.0.0.1:7242/ingest/abe54877-15bd-4ed2-bfd1-f461dfe66d18', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sessionId: 'debug-session',
+            runId: 'pre-fix',
+            hypothesisId: 'H2',
+            location: 'src/lib/inference/manager.ts:checkBackendStatus',
+            message: 'Backend status fetch success',
+            data: { status: response.status, loaded: data.loaded, device: data.device },
+            timestamp: Date.now(),
+          }),
+        }).catch(() => {});
+        // #endregion
+
         this.backendAvailable = true;
         this.modelLoaded = data.loaded;
         this.currentDevice = data.device;
@@ -84,6 +101,22 @@ class InferenceManager {
         };
       }
     } catch (error) {
+      // #region agent log
+      fetch('http://127.0.0.1:7242/ingest/abe54877-15bd-4ed2-bfd1-f461dfe66d18', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'debug-session',
+          runId: 'pre-fix',
+          hypothesisId: 'H2',
+          location: 'src/lib/inference/manager.ts:checkBackendStatus',
+          message: 'Backend status fetch failed',
+          data: { error: error instanceof Error ? error.message : String(error) },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+
       console.log('Backend not available, falling back to simulation mode');
       this.backendAvailable = false;
     }
@@ -151,9 +184,9 @@ class InferenceManager {
     try {
       let blob: Blob;
       
-      if (url.startsWith('data:')) {
-        // Convert base64 to blob
-        const response = await fetch(url);
+    if (url.startsWith('data:')) {
+      // Convert base64 to blob
+      const response = await fetch(url);
         if (!response.ok) {
           throw new Error('Failed to parse base64 image data');
         }
@@ -324,7 +357,7 @@ class InferenceManager {
       console.error('❌ Backend img2img error:', error);
       // Re-throw with cleaner message for display
       if (error instanceof Error) {
-        throw error;
+      throw error;
       }
       throw new Error(`Inference failed: ${error}`);
     }
@@ -338,9 +371,9 @@ class InferenceManager {
     onProgress: ProgressCallback,
     startTime: number
   ): Promise<InferenceResult> {
-    // Simulate progress updates while waiting
-    let currentStep = 0;
-    const totalSteps = parseInt(formData.get('steps') as string) || 20;
+      // Simulate progress updates while waiting
+      let currentStep = 0;
+      const totalSteps = parseInt(formData.get('steps') as string) || 20;
     let progressInterval: ReturnType<typeof setInterval> | null = null;
     
     const startProgress = () => {

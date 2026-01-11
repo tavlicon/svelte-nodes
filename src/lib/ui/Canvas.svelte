@@ -459,7 +459,12 @@
       e.preventDefault();
     }
     if (e.key === 'Escape') {
+      // Close sidebar if open, otherwise deselect all
+      if (sidebarState.isOpen) {
+        sidebarState.isOpen = false;
+      } else {
       graphStore.deselectAll();
+      }
       isDragging = false;
       isOverConnectorIcon = null;
     }
@@ -635,6 +640,11 @@
       marqueeStartWorld = screenToWorld(screenX, screenY, viewWidth, viewHeight);
       marqueeCurrentScreen = null;
       marqueeCurrentWorld = null;
+      
+      // Close left sidebar when clicking on empty canvas
+      if (sidebarState.isOpen) {
+        sidebarState.isOpen = false;
+      }
     }
   }
   
@@ -1034,7 +1044,7 @@
       }
     }
   }
-
+  
   function handleMouseMove(e: MouseEvent) {
     // Only track hover when not dragging or panning
     if (isDragging || isPanning || mode === 'marquee' || isConnecting) {
@@ -1858,15 +1868,15 @@
       class:hovered={model.isHovered}
       style={`left: ${model.screenX}px; top: ${model.screenY}px;`}
     >
-      <div
-        class="model-node-overlay"
-        class:fade-in={model.isNew}
+    <div
+      class="model-node-overlay"
+      class:fade-in={model.isNew}
         class:selected={model.isSelected}
         class:running={model.status === 'running'}
         class:error={model.status === 'error'}
         class:complete={model.status === 'complete'}
         style={`width: ${model.screenWidth}px; height: ${model.screenHeight}px; border-radius: ${model.borderRadius}px;`}
-      >
+    >
         {#if model.status === 'running'}
           <div class="model-status-indicator running">
             <div class="spinner"></div>
@@ -1885,18 +1895,18 @@
             </svg>
           </div>
         {:else}
-          <div class="model-node-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <path d="M12 2L2 7l10 5 10-5-10-5z" />
-              <path d="M2 17l10 5 10-5" />
-              <path d="M2 12l10 5 10-5" />
-            </svg>
-          </div>
+      <div class="model-node-icon">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M12 2L2 7l10 5 10-5-10-5z" />
+          <path d="M2 17l10 5 10-5" />
+          <path d="M2 12l10 5 10-5" />
+        </svg>
+      </div>
         {/if}
-        <div class="model-node-info">
-          <span class="model-node-name">{model.modelName}</span>
+      <div class="model-node-info">
+        <span class="model-node-name">{model.modelName}</span>
           <span class="model-node-type">{model.modelType?.toUpperCase() || 'MODEL'}</span>
-        </div>
+      </div>
         {#if model.status === 'error' && model.error}
           <div class="model-error-badge" title={model.error}>!</div>
         {/if}

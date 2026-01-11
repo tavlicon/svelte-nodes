@@ -52,6 +52,9 @@ from transformers import CLIPTextModel, CLIPTokenizer
 
 app = FastAPI(title="Generative Design Studio Backend", version="1.0.0")
 
+# Debug instrumentation configuration (do not remove until post-fix verification)
+DEBUG_LOG_PATH = Path("/Users/olicon/github/generative-design-studio-2/.cursor/debug.log")
+
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
@@ -256,6 +259,26 @@ async def startup_event():
     logger.info("🚀 Starting Stable Diffusion Backend Server")
     logger.info("📍 Mode: LOCAL ONLY (no network calls)")
     logger.info("=" * 60)
+
+    # region agent log
+    try:
+        DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        DEBUG_LOG_PATH.open("a").write(json.dumps({
+            "sessionId": "debug-session",
+            "runId": "pre-fix",
+            "hypothesisId": "H1",
+            "location": "backend/server.py:startup_event",
+            "message": "Startup model presence check",
+            "data": {
+                "localModelExists": local_model_path.exists(),
+                "safetensorsExists": safetensors_path.exists(),
+                "cwd": os.getcwd()
+            },
+            "timestamp": int(time.time() * 1000)
+        }) + "\n")
+    except Exception:
+        pass
+    # endregion
     
     # Prefer local diffusers format (fully offline)
     if local_model_path.exists():
@@ -301,6 +324,26 @@ async def startup_event():
     else:
         logger.warning("⚠️ Model NOT loaded - inference will fail")
     logger.info("=" * 60)
+
+    # region agent log
+    try:
+        DEBUG_LOG_PATH.open("a").write(json.dumps({
+            "sessionId": "debug-session",
+            "runId": "pre-fix",
+            "hypothesisId": "H1",
+            "location": "backend/server.py:startup_event",
+            "message": "Startup model load result",
+            "data": {
+                "modelLoaded": model_loaded,
+                "device": current_device,
+                "localModelPath": str(local_model_path),
+                "safetensorsPath": str(safetensors_path)
+            },
+            "timestamp": int(time.time() * 1000)
+        }) + "\n")
+    except Exception:
+        pass
+    # endregion
 
 
 @app.get("/api/health")

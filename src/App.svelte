@@ -1,19 +1,60 @@
 <script lang="ts">
-  import Canvas from './lib/ui/Canvas.svelte';
+  import { onMount } from 'svelte';
+  import CanvasPage from './lib/pages/CanvasPage.svelte';
+  import PanelsPage from './lib/pages/PanelsPage.svelte';
+  import ComponentsPage from './lib/pages/ComponentsPage.svelte';
   import Toolbar from './lib/ui/Toolbar.svelte';
-  import NodePanel from './lib/ui/NodePanel.svelte';
-  import Sidebar from './lib/ui/Sidebar.svelte';
-  import { graphStore } from './lib/graph/store.svelte';
   import { theme } from './lib/ui/theme.svelte';
+  import { router, type Page } from './lib/router.svelte';
+  
+  // Initialize router on mount
+  onMount(() => {
+    router.init();
+  });
+  
+  function handleNavClick(page: Page) {
+    router.navigate(page);
+  }
 </script>
 
 <div class="studio" class:light={theme.current === 'light'} class:dark={theme.current === 'dark'}>
+  <!-- Navigation tabs -->
+  <nav class="page-nav">
+    <button 
+      class="nav-tab" 
+      class:active={router.page === 'canvas'}
+      onclick={() => handleNavClick('canvas')}
+    >
+      Canvas
+    </button>
+    <button 
+      class="nav-tab" 
+      class:active={router.page === 'panels'}
+      onclick={() => handleNavClick('panels')}
+    >
+      Panels
+    </button>
+    <button 
+      class="nav-tab" 
+      class:active={router.page === 'components'}
+      onclick={() => handleNavClick('components')}
+    >
+      Components
+    </button>
+  </nav>
+  
+  {#if router.page === 'canvas'}
   <Toolbar />
+  {/if}
   
   <div class="workspace">
-    <Sidebar />
-    <Canvas />
-    <NodePanel />
+    {#if router.page === 'canvas'}
+      <CanvasPage />
+    {:else if router.page === 'panels'}
+      <PanelsPage />
+    {:else if router.page === 'components'}
+      <ComponentsPage />
+    {/if}
   </div>
 </div>
 
@@ -90,6 +131,45 @@
     
     --canvas-dot: rgba(255, 255, 255, 0.08);
     --node-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  }
+  
+  .page-nav {
+    display: flex;
+    gap: 0;
+    padding: 0 16px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  
+  .nav-tab {
+    padding: 12px 20px;
+    font-size: 13px;
+    font-weight: 500;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    position: relative;
+  }
+  
+  .nav-tab:hover {
+    color: var(--text-secondary);
+  }
+  
+  .nav-tab.active {
+    color: var(--text-primary);
+  }
+  
+  .nav-tab.active::after {
+    content: '';
+    position: absolute;
+    bottom: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: var(--accent-primary);
+    border-radius: 2px 2px 0 0;
   }
   
   .workspace {

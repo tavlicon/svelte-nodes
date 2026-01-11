@@ -3,13 +3,21 @@
   import { theme } from './theme.svelte';
   import { sidebarState } from './sidebarState.svelte';
   import { listFiles, formatFileSize, type FileInfo } from '../services/file-service';
+  import Panel from './Panel.svelte';
 
   // Panel state
   let activePanel = $state<'assets' | 'models' | 'canvases' | null>(null);
   
-  // Sync sidebar state with shared store
+  // Sync sidebar state with shared store (two-way)
   $effect(() => {
     sidebarState.isOpen = activePanel !== null;
+  });
+  
+  // Listen for external close requests (e.g., clicking on canvas)
+  $effect(() => {
+    if (!sidebarState.isOpen && activePanel !== null) {
+      activePanel = null;
+    }
   });
 
   function togglePanel(panel: 'assets' | 'models' | 'canvases') {
@@ -226,8 +234,9 @@
   </nav>
   
   <!-- Floating panel -->
-  {#if activePanel}
-    <div class="floating-panel">
+  <div class="floating-panel-container">
+    <Panel visible={activePanel !== null} width={429} position="left">
+      {#snippet customHeader()}
       {#if activePanel === 'assets'}
         <div class="panel-header">
           <div class="panel-tabs">
@@ -259,7 +268,47 @@
             </button>
           </div>
         </div>
-        
+        {:else if activePanel === 'models'}
+          <div class="panel-header">
+            <div class="panel-tabs">
+              <button class="panel-tab active">Models</button>
+            </div>
+            <div class="header-actions">
+              <button class="icon-btn" onclick={refreshFiles} title="Refresh">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 12a9 9 0 11-2.2-5.9M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <button class="icon-btn" onclick={closePanel} title="Close">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        {:else if activePanel === 'canvases'}
+          <div class="panel-header">
+            <div class="panel-tabs">
+              <button class="panel-tab active">Canvases</button>
+            </div>
+            <div class="header-actions">
+              <button class="icon-btn" onclick={refreshFiles} title="Refresh">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M21 12a9 9 0 11-2.2-5.9M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+              <button class="icon-btn" onclick={closePanel} title="Close">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        {/if}
+      {/snippet}
+      
+      <!-- Panel Content -->
+      {#if activePanel === 'assets'}
         <div class="panel-content">
           {#if isLoading}
             <div class="loading-state">
@@ -324,26 +373,7 @@
             {/if}
           {/if}
         </div>
-        
       {:else if activePanel === 'models'}
-        <div class="panel-header">
-          <div class="panel-tabs">
-            <button class="panel-tab active">Models</button>
-          </div>
-          <div class="header-actions">
-            <button class="icon-btn" onclick={refreshFiles} title="Refresh">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 12a9 9 0 11-2.2-5.9M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </button>
-            <button class="icon-btn" onclick={closePanel} title="Close">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </button>
-          </div>
-        </div>
-        
         <div class="panel-content">
           {#if isLoading}
             <div class="loading-state">
@@ -392,26 +422,7 @@
             </div>
           {/if}
         </div>
-        
       {:else if activePanel === 'canvases'}
-        <div class="panel-header">
-          <div class="panel-tabs">
-            <button class="panel-tab active">Canvases</button>
-          </div>
-          <div class="header-actions">
-            <button class="icon-btn" onclick={refreshFiles} title="Refresh">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M21 12a9 9 0 11-2.2-5.9M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </button>
-            <button class="icon-btn" onclick={closePanel} title="Close">
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round" />
-              </svg>
-            </button>
-          </div>
-        </div>
-        
         <div class="panel-content">
           {#if isLoading}
             <div class="loading-state">
@@ -447,8 +458,8 @@
           {/if}
         </div>
       {/if}
+    </Panel>
     </div>
-  {/if}
 </div>
 
 <style>
@@ -506,22 +517,13 @@
     letter-spacing: 0.02em;
   }
   
-  /* Floating panel */
-  .floating-panel {
+  /* Floating panel container */
+  .floating-panel-container {
     position: absolute;
     left: calc(72px + 12px); /* nav width + gap */
     top: 12px;
     bottom: 36px;
-    width: 429px;
-    background: #141414;
-    border: 0.5px solid #28282A;
-    border-radius: 20px;
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-    box-shadow: 0 175px 49px 0 rgba(5, 5, 5, 0.01), 0 112px 45px 0 rgba(5, 5, 5, 0.04);
-    backdrop-filter: blur(50px);
-    pointer-events: auto;
+    pointer-events: none;
   }
   
   .panel-header {
