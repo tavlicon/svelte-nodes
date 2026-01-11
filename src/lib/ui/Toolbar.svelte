@@ -2,7 +2,7 @@
   import { graphStore } from '../graph/store.svelte';
   import { nodeRegistry } from '../graph/nodes/registry';
   import { inferenceManager } from '../inference/manager';
-  import { executionEngine } from '../graph/execution';
+  import { executionEngine } from '../orchestration/execution';
   
   let showNodeMenu = $state(false);
   let showZoomMenu = $state(false);

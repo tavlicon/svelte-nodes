@@ -1,14 +1,27 @@
 /**
  * Topological execution engine for the node graph
  * Handles dependency resolution, dirty tracking, and execution scheduling
+ * 
+ * Note: This engine reports events via callbacks and does NOT directly
+ * manipulate UI state. UI behaviors (like selecting nodes after completion)
+ * should be handled by the callback handlers in the UI layer.
  */
 
-import type { NodeInstance, Edge } from './types';
-import { graphStore } from './store.svelte';
-import { nodeRegistry } from './nodes/registry';
+import type { NodeInstance, Edge } from '../graph/types';
+import { graphStore } from '../graph/store.svelte';
+import { nodeRegistry } from '../graph/nodes/registry';
 import { inferenceManager, type Img2ImgRequest } from '../inference/manager';
 
 export type ExecutionStatus = 'idle' | 'pending' | 'running' | 'complete' | 'error';
+
+/**
+ * Callbacks for execution events - allows UI layer to respond to execution lifecycle
+ * This keeps UI logic out of the execution engine (separation of concerns)
+ */
+export interface ExecutionCallbacks {
+  /** Called when a model node completes successfully and creates an output node */
+  onModelJobComplete?: (modelNodeId: string, outputNodeId: string) => void;
+}
 
 interface ExecutionNode {
   id: string;
@@ -21,6 +34,15 @@ class ExecutionEngine {
   private executionGraph: Map<string, ExecutionNode> = new Map();
   private running = false;
   private queue: string[] = [];
+  private callbacks: ExecutionCallbacks = {};
+  
+  /**
+   * Set callbacks for execution events
+   * This allows the UI layer to respond to execution lifecycle events
+   */
+  setCallbacks(callbacks: ExecutionCallbacks) {
+    this.callbacks = callbacks;
+  }
   
   /**
    * Build the execution graph from the current node state
@@ -228,15 +250,11 @@ class ExecutionEngine {
         execNode.dirty = false;
       }
       
-      // For model nodes: after 1 second, reset to idle and select the output node
+      // For model nodes: notify UI layer via callback so it can handle post-completion behavior
+      // (UI logic like timeouts, node selection, etc. should be handled by the callback handler)
       if (node.type === 'model' && outputs._outputNodeId) {
         const outputNodeId = outputs._outputNodeId as string;
-        setTimeout(() => {
-          // Reset model node to idle state
-          graphStore.updateNode(nodeId, { status: 'idle' });
-          // Select the output node
-          graphStore.selectNode(outputNodeId, false);
-        }, 1000);
+        this.callbacks.onModelJobComplete?.(nodeId, outputNodeId);
       }
       
     } catch (error) {

@@ -4,6 +4,7 @@
   import { Canvas2DRenderer } from '../canvas/renderer-2d';
   import { getNodesInRect } from '../canvas/interaction';
   import { graphStore, getNodesVersion } from '../graph/store.svelte';
+  import { executionEngine } from '../orchestration/execution';
   import { theme } from './theme.svelte';
   import { sidebarState, ICON_SIDEBAR_WIDTH } from './sidebarState.svelte';
   import { uploadFile } from '../services/file-service';
@@ -116,6 +117,20 @@
     // Listen for sidebar click-to-add events
     window.addEventListener('sidebar-add-image', handleSidebarAddImage as EventListener);
     window.addEventListener('sidebar-add-model', handleSidebarAddModel as EventListener);
+    
+    // Set up execution engine callbacks for UI behaviors
+    // This keeps UI logic (timeouts, node selection) in the UI layer
+    executionEngine.setCallbacks({
+      onModelJobComplete: (modelNodeId: string, outputNodeId: string) => {
+        // After showing the "complete" state for 1 second:
+        // 1. Reset the model node back to idle state
+        // 2. Select the newly created output image node
+        setTimeout(() => {
+          graphStore.updateNode(modelNodeId, { status: 'idle' });
+          graphStore.selectNode(outputNodeId, false);
+        }, 1000);
+      },
+    });
     
     // Add test nodes on load for debugging (enable via URL param: ?test=1)
     if (typeof window !== 'undefined' && window.location.search.includes('test=1')) {
@@ -1838,7 +1853,7 @@
           <!-- Connector icon - replaces port, positioned at right edge -->
           <div 
             class="node-connector-icon" 
-            class:visible={img.isSelected || img.isHovered}
+            class:visible={img.isHovered}
             class:dragging={isConnecting && connectionStart?.nodeId === img.id}
             onpointerdown={(e) => handleConnectorMouseDown(e, img.id, 'image')}
             onmouseenter={() => handleConnectorMouseEnter(img.id)}
@@ -1974,7 +1989,7 @@
           <!-- Connector icon - replaces port, positioned at right edge -->
           <div 
             class="node-connector-icon" 
-            class:visible={output.isSelected || output.isHovered}
+            class:visible={output.isHovered}
             class:dragging={isConnecting && connectionStart?.nodeId === output.id}
             onpointerdown={(e) => handleConnectorMouseDown(e, output.id, 'image')}
             onmouseenter={() => handleConnectorMouseEnter(output.id)}
