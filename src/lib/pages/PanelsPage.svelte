@@ -1,71 +1,53 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import Panel from '../ui/Panel.svelte';
-  import NodePanel from '../ui/NodePanel.svelte';
-  import { graphStore } from '../graph/store.svelte';
-  import { listFiles, formatFileSize, type FileInfo } from '../services/file-service';
   
-  // Assets panel state
+  // Assets panel state - local UI only
   let assetsTab = $state<'generated' | 'imported'>('generated');
-  let generatedFiles = $state<FileInfo[]>([]);
-  let importedFiles = $state<FileInfo[]>([]);
-  let modelFiles = $state<FileInfo[]>([]);
-  let isLoadingAssets = $state(false);
-  let isLoadingModels = $state(false);
   
-  // Demo model node ID
-  let demoModelNodeId = $state<string | null>(null);
+  // Mock data for generated files
+  const mockGeneratedFiles = [
+    { name: 'img2img_001.png', size: '102.4 KB', path: '/data/output/img2img_001.png' },
+    { name: 'img2img_002.png', size: '98.7 KB', path: '/data/output/img2img_002.png' },
+    { name: 'img2img_003.png', size: '105.2 KB', path: '/data/output/img2img_003.png' },
+    { name: 'img2img_004.png', size: '112.1 KB', path: '/data/output/img2img_004.png' },
+    { name: 'img2img_005.png', size: '94.3 KB', path: '/data/output/img2img_005.png' },
+    { name: 'img2img_006.png', size: '108.9 KB', path: '/data/output/img2img_006.png' },
+  ];
   
-  async function refreshAssets() {
-    isLoadingAssets = true;
-    try {
-      const [generated, imported] = await Promise.all([
-        listFiles('output'),
-        listFiles('input'),
-      ]);
-      generatedFiles = generated;
-      importedFiles = imported;
-    } catch (error) {
-      console.error('Error refreshing assets:', error);
-    } finally {
-      isLoadingAssets = false;
+  // Mock data for imported files
+  const mockImportedFiles = [
+    { name: 'reference_shoe.png', size: '45.2 KB', path: '/data/input/reference_shoe.png' },
+    { name: 'texture_leather.jpg', size: '128.5 KB', path: '/data/input/texture_leather.jpg' },
+    { name: 'colorway_sample.png', size: '32.1 KB', path: '/data/input/colorway_sample.png' },
+  ];
+  
+  // Mock data for model files
+  const mockModelFiles = [
+    { name: 'v1-5-pruned-emaonly-fp16.safetensors', type: 'safetensors', size: '2.13 GB' },
+    { name: 'sd-v1-5-inpainting.ckpt', type: 'ckpt', size: '4.27 GB' },
+    { name: 'vae-ft-mse-840000.safetensors', type: 'safetensors', size: '334.6 MB' },
+  ];
+  
+  // Mock node panel data
+  const mockNodeData = {
+    type: 'MODEL',
+    name: 'SD 1.5 img2img',
+    params: {
+      positive_prompt: 'a beautiful, photograph',
+      negative_prompt: 'blurry, low quality',
+      seed: 42,
+      steps: 20,
+      cfg: 7.5,
+      denoise: 0.75,
+      sampler: 'euler_a',
+      scheduler: 'normal',
     }
-  }
+  };
   
-  async function refreshModels() {
-    isLoadingModels = true;
-    try {
-      modelFiles = await listFiles('models');
-    } catch (error) {
-      console.error('Error refreshing models:', error);
-    } finally {
-      isLoadingModels = false;
-    }
+  // Demo refresh action (no-op, just for visual demo)
+  function handleRefresh() {
+    // No-op - purely visual demo
   }
-  
-  function ensureDemoModelNode() {
-    let existingModelNode: string | null = null;
-    graphStore.nodes.forEach((node, id) => {
-      if (node.type === 'model' && !existingModelNode) {
-        existingModelNode = id;
-      }
-    });
-    
-    if (existingModelNode) {
-      demoModelNodeId = existingModelNode;
-      graphStore.selectNode(existingModelNode);
-    } else {
-      const nodeId = graphStore.addNode('model', 0, 0);
-      demoModelNodeId = nodeId;
-      graphStore.selectNode(nodeId);
-    }
-  }
-  
-  onMount(() => {
-    refreshAssets();
-    refreshModels();
-    ensureDemoModelNode();
-  });
 </script>
 
 <div class="panels-page">
@@ -103,7 +85,7 @@
                 </button>
               </div>
               <div class="header-actions">
-                <button class="icon-btn" onclick={refreshAssets} title="Refresh">
+                <button class="icon-btn" onclick={handleRefresh} title="Refresh">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 12a9 9 0 11-2.2-5.9M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round" />
                   </svg>
@@ -113,45 +95,34 @@
           {/snippet}
           
           <div class="panel-content">
-            {#if isLoadingAssets}
-              <div class="loading-state">
-                <div class="spinner"></div>
-                <p>Loading...</p>
+            {#if assetsTab === 'generated'}
+              <div class="file-grid">
+                {#each mockGeneratedFiles as file (file.name)}
+                  <button class="file-card" title={`${file.name} (${file.size})`}>
+                    <div class="file-thumbnail placeholder">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <path d="M21 15l-5-5L5 21" />
+                      </svg>
+                    </div>
+                  </button>
+                {/each}
               </div>
-            {:else if assetsTab === 'generated'}
-              {#if generatedFiles.length === 0}
-                <div class="empty-state">
-                  <h3>No generated images</h3>
-                  <p>Run the graph to generate images</p>
-                </div>
-              {:else}
-                <div class="file-grid">
-                  {#each generatedFiles as file (file.name)}
-                    <button class="file-card" title={`${file.name} (${formatFileSize(file.size)})`}>
-                      <div class="file-thumbnail">
-                        <img src={file.path} alt={file.name} loading="lazy" />
-                      </div>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
             {:else}
-              {#if importedFiles.length === 0}
-                <div class="empty-state">
-                  <h3>No imported assets</h3>
-                  <p>Drop images onto the canvas to import</p>
-                </div>
-              {:else}
-                <div class="file-grid">
-                  {#each importedFiles as file (file.name)}
-                    <button class="file-card" title={`${file.name} (${formatFileSize(file.size)})`}>
-                      <div class="file-thumbnail">
-                        <img src={file.path} alt={file.name} loading="lazy" />
-                      </div>
-                    </button>
-                  {/each}
-                </div>
-              {/if}
+              <div class="file-grid">
+                {#each mockImportedFiles as file (file.name)}
+                  <button class="file-card" title={`${file.name} (${file.size})`}>
+                    <div class="file-thumbnail placeholder">
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <rect x="3" y="3" width="18" height="18" rx="2" />
+                        <circle cx="8.5" cy="8.5" r="1.5" />
+                        <path d="M21 15l-5-5L5 21" />
+                      </svg>
+                    </div>
+                  </button>
+                {/each}
+              </div>
             {/if}
           </div>
         </Panel>
@@ -173,7 +144,7 @@
                 <button class="panel-tab active">Models</button>
               </div>
               <div class="header-actions">
-                <button class="icon-btn" onclick={refreshModels} title="Refresh">
+                <button class="icon-btn" onclick={handleRefresh} title="Refresh">
                   <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21 12a9 9 0 11-2.2-5.9M21 3v6h-6" stroke-linecap="round" stroke-linejoin="round" />
                   </svg>
@@ -183,44 +154,32 @@
           {/snippet}
           
           <div class="panel-content">
-            {#if isLoadingModels}
-              <div class="loading-state">
-                <div class="spinner"></div>
-                <p>Loading...</p>
-              </div>
-            {:else if modelFiles.length === 0}
-              <div class="empty-state">
-                <h3>No models available</h3>
-                <p>Add models to data/models directory</p>
-              </div>
-            {:else}
-              <div class="file-list">
-                {#each modelFiles as file (file.name)}
-                  <button class="file-item model-item" title={file.name}>
-                    <div class="model-icon">
-                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                        <path d="M2 17l10 5 10-5" />
-                        <path d="M2 12l10 5 10-5" />
-                      </svg>
+            <div class="file-list">
+              {#each mockModelFiles as file (file.name)}
+                <button class="file-item model-item" title={file.name}>
+                  <div class="model-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                      <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                      <path d="M2 17l10 5 10-5" />
+                      <path d="M2 12l10 5 10-5" />
+                    </svg>
+                  </div>
+                  <div class="model-info">
+                    <span class="file-name">{file.name}</span>
+                    <div class="model-meta">
+                      <span class="model-type">{file.type.toUpperCase()}</span>
+                      <span class="file-size">{file.size}</span>
                     </div>
-                    <div class="model-info">
-                      <span class="file-name">{file.name}</span>
-                      <div class="model-meta">
-                        <span class="model-type">{file.type.toUpperCase()}</span>
-                        <span class="file-size">{formatFileSize(file.size)}</span>
-                      </div>
-                    </div>
-                  </button>
-                {/each}
-              </div>
-            {/if}
+                  </div>
+                </button>
+              {/each}
+            </div>
           </div>
         </Panel>
       </div>
     </section>
     
-    <!-- Node Panel -->
+    <!-- Node Panel (Static Mock) -->
     <section class="component-section">
       <div class="section-header">
         <h2>Node Panel</h2>
@@ -228,7 +187,82 @@
       </div>
       
       <div class="panel-wrapper nodepanel">
-        <NodePanel />
+        <Panel visible={true} width={300} position="right">
+          {#snippet header()}
+            <span class="node-type">{mockNodeData.type}</span>
+            <h2 class="node-name">{mockNodeData.name}</h2>
+          {/snippet}
+          
+          <div class="panel-inner">
+            <!-- Conditioning Section -->
+            <section class="params-section">
+              <h3 class="section-title">Conditioning</h3>
+              <div class="param-group">
+                <div class="param-field">
+                  <label class="param-label">Positive Prompt</label>
+                  <textarea class="param-textarea" readonly>{mockNodeData.params.positive_prompt}</textarea>
+                </div>
+                <div class="param-field">
+                  <label class="param-label">Negative Prompt</label>
+                  <textarea class="param-textarea" readonly>{mockNodeData.params.negative_prompt}</textarea>
+                </div>
+              </div>
+            </section>
+            
+            <!-- Sampler Parameters Section -->
+            <section class="params-section">
+              <h3 class="section-title">Sampler Parameters</h3>
+              <div class="param-group">
+                <div class="param-field">
+                  <label class="param-label">Seed</label>
+                  <input type="number" class="param-input" value={mockNodeData.params.seed} readonly />
+                </div>
+                <div class="param-field">
+                  <label class="param-label">Steps</label>
+                  <div class="slider-row">
+                    <input type="range" class="param-slider" min="1" max="50" value={mockNodeData.params.steps} disabled />
+                    <span class="slider-value">{mockNodeData.params.steps}</span>
+                  </div>
+                </div>
+                <div class="param-field">
+                  <label class="param-label">CFG Scale</label>
+                  <div class="slider-row">
+                    <input type="range" class="param-slider" min="1" max="20" step="0.5" value={mockNodeData.params.cfg} disabled />
+                    <span class="slider-value">{mockNodeData.params.cfg}</span>
+                  </div>
+                </div>
+                <div class="param-field">
+                  <label class="param-label">Sampler</label>
+                  <select class="param-select" disabled>
+                    <option value="euler_a" selected>Euler Ancestral</option>
+                  </select>
+                </div>
+                <div class="param-field">
+                  <label class="param-label">Scheduler</label>
+                  <select class="param-select" disabled>
+                    <option value="normal" selected>Normal</option>
+                  </select>
+                </div>
+                <div class="param-field">
+                  <label class="param-label">Denoise</label>
+                  <div class="slider-row">
+                    <input type="range" class="param-slider" min="0" max="1" step="0.01" value={mockNodeData.params.denoise} disabled />
+                    <span class="slider-value">{mockNodeData.params.denoise}</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+            
+            <!-- Status Section -->
+            <section class="params-section">
+              <h3 class="section-title">Status</h3>
+              <div class="status-row">
+                <span class="status-label">State</span>
+                <span class="status-badge complete">COMPLETE</span>
+              </div>
+            </section>
+          </div>
+        </Panel>
       </div>
     </section>
   </div>
@@ -319,12 +353,6 @@
   }
   
   /* NodePanel container - remove extra positioning */
-  .panel-wrapper.nodepanel :global(.node-panel-container) {
-    position: static;
-    width: 100%;
-    height: 100%;
-  }
-  
   .panel-wrapper.nodepanel :global(.panel) {
     position: relative;
     width: 100%;
@@ -424,53 +452,6 @@
     background: rgba(255, 255, 255, 0.25);
   }
   
-  /* Empty state */
-  .empty-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
-    padding: 48px 16px;
-    color: rgba(255, 255, 255, 0.4);
-  }
-  
-  .empty-state h3 {
-    font-size: 14px;
-    font-weight: 500;
-    margin: 0 0 4px 0;
-    color: rgba(255, 255, 255, 0.5);
-  }
-  
-  .empty-state p {
-    font-size: 12px;
-    margin: 0;
-  }
-  
-  /* Loading state */
-  .loading-state {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    padding: 48px 16px;
-    color: rgba(255, 255, 255, 0.4);
-  }
-  
-  .spinner {
-    width: 24px;
-    height: 24px;
-    border: 2px solid rgba(255, 255, 255, 0.1);
-    border-top-color: rgba(255, 255, 255, 0.4);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-    margin-bottom: 8px;
-  }
-  
-  @keyframes spin {
-    to { transform: rotate(360deg); }
-  }
-  
   /* File grid for images */
   .file-grid {
     display: grid;
@@ -497,6 +478,13 @@
   .file-thumbnail {
     width: 100%;
     height: 100%;
+  }
+  
+  .file-thumbnail.placeholder {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.2);
   }
   
   .file-thumbnail img {
@@ -576,5 +564,150 @@
   .file-size {
     font-size: 11px;
     color: var(--text-muted);
+  }
+  
+  /* Node Panel Styles */
+  .node-type {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--accent-primary);
+    display: block;
+    margin-bottom: 2px;
+  }
+  
+  .node-name {
+    font-size: 18px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+  }
+  
+  .panel-inner {
+    padding: 0 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+  }
+  
+  .params-section {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .section-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin: 0;
+  }
+  
+  .param-group {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .param-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  
+  .param-label {
+    font-size: 11px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-transform: capitalize;
+  }
+  
+  .param-input,
+  .param-textarea,
+  .param-select {
+    width: 100%;
+    padding: 8px 10px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    font-size: 12px;
+  }
+  
+  .param-textarea {
+    min-height: 50px;
+    resize: vertical;
+    font-family: var(--font-mono);
+  }
+  
+  .param-select {
+    cursor: pointer;
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 36px;
+  }
+  
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .param-slider {
+    flex: 1;
+    height: 4px;
+    appearance: none;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+  }
+  
+  .param-slider::-webkit-slider-thumb {
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+  }
+  
+  .slider-value {
+    min-width: 40px;
+    padding: 3px 6px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-family: var(--font-mono);
+    text-align: center;
+    color: var(--text-primary);
+  }
+  
+  .status-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  
+  .status-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+  }
+  
+  .status-badge {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 4px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  
+  .status-badge.complete {
+    background: rgba(16, 185, 129, 0.15);
+    color: #10b981;
   }
 </style>

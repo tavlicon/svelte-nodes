@@ -3,7 +3,12 @@
   import { theme } from './theme.svelte';
   import { sidebarState } from './sidebarState.svelte';
   import { listFiles, formatFileSize, type FileInfo } from '../services/file-service';
+  import { router, type Page } from '../router.svelte';
   import Panel from './Panel.svelte';
+  
+  function navigateTo(page: Page) {
+    router.navigate(page);
+  }
 
   // Panel state
   let activePanel = $state<'assets' | 'models' | 'canvases' | null>(null);
@@ -40,8 +45,8 @@
     activePanel = null;
   }
 
-  // Assets panel state
-  let assetsTab = $state<'generated' | 'imported'>('generated');
+  // Assets panel state - default to imported
+  let assetsTab = $state<'generated' | 'imported'>('imported');
 
   // File lists
   let generatedFiles = $state<FileInfo[]>([]);
@@ -217,10 +222,9 @@
     </button>
     
     <button 
-      class="sidebar-icon"
-      class:active={activePanel === 'canvases'}
-      onclick={() => togglePanel('canvases')}
-      title="Canvases"
+      class="sidebar-icon disabled"
+      disabled
+      title="Canvases (Coming Soon)"
     >
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <rect x="3" y="3" width="8" height="6" rx="1" />
@@ -230,6 +234,22 @@
         <path d="M17 9v3a3 3 0 01-3 3h0" stroke-linecap="round" />
       </svg>
       <span class="icon-label">Canvases</span>
+    </button>
+    
+    <!-- Spacer -->
+    <div class="sidebar-spacer"></div>
+    
+    <!-- Page navigation: Only show UI button on Canvas page -->
+    <button 
+      class="sidebar-icon page-nav"
+      onclick={() => navigateTo('ui')}
+      title="UI Library"
+    >
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z" />
+        <path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12" />
+      </svg>
+      <span class="icon-label">UI</span>
     </button>
   </nav>
   
@@ -242,17 +262,17 @@
           <div class="panel-tabs">
             <button 
               class="panel-tab"
-              class:active={assetsTab === 'generated'}
-              onclick={() => assetsTab = 'generated'}
-            >
-              Generated
-            </button>
-            <button 
-              class="panel-tab"
               class:active={assetsTab === 'imported'}
               onclick={() => assetsTab = 'imported'}
             >
               Imported
+            </button>
+            <button 
+              class="panel-tab"
+              class:active={assetsTab === 'generated'}
+              onclick={() => assetsTab = 'generated'}
+            >
+              Generated
             </button>
           </div>
           <div class="header-actions">
@@ -485,6 +505,11 @@
     pointer-events: auto;
   }
   
+  .sidebar-spacer {
+    flex: 1;
+    min-height: 20px;
+  }
+  
   .sidebar-icon {
     display: flex;
     flex-direction: column;
@@ -501,7 +526,7 @@
     border-radius: var(--radius-md);
   }
   
-  .sidebar-icon:hover {
+  .sidebar-icon:hover:not(:disabled) {
     color: var(--text-primary);
     background: var(--bg-tertiary);
   }
@@ -509,6 +534,12 @@
   .sidebar-icon.active {
     color: var(--accent-primary);
     background: var(--accent-glow);
+  }
+  
+  .sidebar-icon.disabled,
+  .sidebar-icon:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
   }
   
   .icon-label {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import CanvasPage from './lib/pages/CanvasPage.svelte';
+  import UIIndexPage from './lib/pages/UIIndexPage.svelte';
   import PanelsPage from './lib/pages/PanelsPage.svelte';
   import ComponentsPage from './lib/pages/ComponentsPage.svelte';
   import Toolbar from './lib/ui/Toolbar.svelte';
@@ -15,53 +16,101 @@
   function handleNavClick(page: Page) {
     router.navigate(page);
   }
+  
+  function toggleTheme() {
+    theme.toggle();
+  }
+  
+  // Derive breadcrumb for UI section
+  let breadcrumb = $derived.by(() => {
+    if (router.page === 'ui/components') return 'Components';
+    if (router.page === 'ui/panels') return 'Panels';
+    return null;
+  });
 </script>
 
 <div class="studio" class:light={theme.current === 'light'} class:dark={theme.current === 'dark'}>
-  <!-- Navigation tabs -->
-  <nav class="page-nav">
-    <button 
-      class="nav-tab" 
-      class:active={router.page === 'canvas'}
-      onclick={() => handleNavClick('canvas')}
-    >
-      Canvas
-    </button>
-    <button 
-      class="nav-tab" 
-      class:active={router.page === 'panels'}
-      onclick={() => handleNavClick('panels')}
-    >
-      Panels
-    </button>
-    <button 
-      class="nav-tab" 
-      class:active={router.page === 'components'}
-      onclick={() => handleNavClick('components')}
-    >
-      Components
-    </button>
-  </nav>
-  
-  {#if router.page === 'canvas'}
-  <Toolbar />
+  {#if router.isUISection}
+    <!-- UI pages: minimal nav with Canvas button at bottom -->
+    <nav class="ui-nav">
+      <div class="nav-spacer"></div>
+      
+      <div class="nav-bottom">
+        <!-- Only show Canvas button on UI pages -->
+        <button 
+          class="nav-icon"
+          onclick={() => handleNavClick('canvas')}
+          title="Canvas"
+        >
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <rect x="3" y="3" width="18" height="18" rx="2" />
+            <path d="M3 9h18" />
+            <path d="M9 21V9" />
+          </svg>
+          <span class="nav-label">Canvas</span>
+        </button>
+      </div>
+    </nav>
   {/if}
   
-  <div class="workspace">
+  <div class="main-area">
     {#if router.page === 'canvas'}
-      <CanvasPage />
-    {:else if router.page === 'panels'}
-      <PanelsPage />
-    {:else if router.page === 'components'}
-      <ComponentsPage />
+      <Toolbar />
+    {:else if router.isUISection}
+      <!-- UI header with optional breadcrumb and theme toggle -->
+      <header class="ui-header">
+        <div class="ui-header-left">
+          {#if breadcrumb}
+            <button class="breadcrumb-link" onclick={() => handleNavClick('ui')}>UI</button>
+            <span class="breadcrumb-sep">/</span>
+            <span class="breadcrumb-current">{breadcrumb}</span>
+          {/if}
+        </div>
+        <div class="ui-header-right">
+          <button 
+            class="theme-toggle-btn"
+            onclick={toggleTheme}
+            title={theme.current === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {#if theme.current === 'dark'}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <circle cx="12" cy="12" r="5" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+              </svg>
+            {:else}
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
+              </svg>
+            {/if}
+          </button>
+        </div>
+      </header>
     {/if}
+    
+    <div class="workspace">
+      {#if router.page === 'canvas'}
+        <CanvasPage />
+      {:else if router.page === 'ui'}
+        <UIIndexPage />
+      {:else if router.page === 'ui/panels'}
+        <PanelsPage />
+      {:else if router.page === 'ui/components'}
+        <ComponentsPage />
+      {/if}
+    </div>
   </div>
 </div>
 
 <style>
   .studio {
     display: flex;
-    flex-direction: column;
     width: 100%;
     height: 100%;
     background: var(--bg-primary);
@@ -133,43 +182,62 @@
     --node-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
   }
   
-  .page-nav {
+  /* UI pages navigation rail */
+  .ui-nav {
     display: flex;
-    gap: 0;
-    padding: 0 16px;
+    flex-direction: column;
+    width: 72px;
     background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-subtle);
+    border-right: 1px solid var(--border-subtle);
+    flex-shrink: 0;
+    padding: 12px 0;
   }
   
-  .nav-tab {
-    padding: 12px 20px;
-    font-size: 13px;
-    font-weight: 500;
+  .nav-spacer {
+    flex: 1;
+  }
+  
+  .nav-bottom {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+  }
+  
+  .nav-icon {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 8px;
+    margin: 0 8px;
     background: none;
     border: none;
+    border-radius: var(--radius-md);
     color: var(--text-muted);
     cursor: pointer;
     transition: all 0.15s ease;
-    position: relative;
   }
   
-  .nav-tab:hover {
+  .nav-icon:hover {
     color: var(--text-secondary);
+    background: var(--border-subtle);
   }
   
-  .nav-tab.active {
-    color: var(--text-primary);
+  .nav-label {
+    font-size: 9px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.02em;
   }
   
-  .nav-tab.active::after {
-    content: '';
-    position: absolute;
-    bottom: -1px;
-    left: 0;
-    right: 0;
-    height: 2px;
-    background: var(--accent-primary);
-    border-radius: 2px 2px 0 0;
+  /* Main area */
+  .main-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    overflow: hidden;
   }
   
   .workspace {
@@ -177,5 +245,74 @@
     display: flex;
     position: relative;
     overflow: hidden;
+  }
+  
+  /* UI header with breadcrumb and theme toggle */
+  .ui-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 24px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-subtle);
+    min-height: 44px;
+  }
+  
+  .ui-header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .ui-header-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  
+  .breadcrumb-link {
+    background: none;
+    border: none;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 0;
+    transition: color 0.15s ease;
+  }
+  
+  .breadcrumb-link:hover {
+    color: var(--accent-primary);
+  }
+  
+  .breadcrumb-sep {
+    color: var(--text-muted);
+    opacity: 0.5;
+  }
+  
+  .breadcrumb-current {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+  
+  .theme-toggle-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  
+  .theme-toggle-btn:hover {
+    background: var(--bg-elevated);
+    border-color: var(--border-default);
+    color: var(--text-primary);
   }
 </style>

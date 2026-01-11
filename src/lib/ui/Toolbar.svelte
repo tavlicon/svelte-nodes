@@ -1,7 +1,6 @@
 <script lang="ts">
   import { graphStore } from '../graph/store.svelte';
   import { nodeRegistry } from '../graph/nodes/registry';
-  import { theme } from './theme.svelte';
   import { inferenceManager } from '../inference/manager';
   import { executionEngine } from '../graph/execution';
   
@@ -188,11 +187,6 @@
 </script>
 
 <header class="toolbar">
-  <div class="toolbar-section brand">
-    <span class="logo">◆</span>
-    <span class="title">Generative Studio</span>
-  </div>
-  
   <div class="toolbar-section actions">
     <div class="dropdown">
       <button 
@@ -336,19 +330,6 @@
       {/if}
     </div>
     
-    <div class="separator"></div>
-    
-    <button 
-      class="toolbar-btn theme-toggle"
-      onclick={() => theme.toggle()}
-      title={theme.isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
-    >
-      {#if theme.isDark}
-        <span class="icon">☀️</span>
-      {:else}
-        <span class="icon">🌙</span>
-      {/if}
-    </button>
   </div>
 </header>
 
@@ -393,21 +374,6 @@
     display: flex;
     align-items: center;
     gap: 8px;
-  }
-  
-  .brand {
-    gap: 10px;
-  }
-  
-  .logo {
-    font-size: 20px;
-    color: var(--accent-primary);
-  }
-  
-  .title {
-    font-weight: 600;
-    font-size: 14px;
-    letter-spacing: -0.02em;
   }
   
   .toolbar-btn {
