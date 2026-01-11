@@ -3,12 +3,18 @@
  * Handles all HTTP communication with the Python inference backend
  */
 
-import type { Img2ImgRequest, InferenceResult, InferenceProgress } from './types';
+import type { Img2ImgRequest, InferenceResult, InferenceProgress, TripoSRRequest, TripoSRResult } from './types';
 
 const BACKEND_URL = 'http://localhost:8000';
 
 export interface BackendStatus {
   modelLoaded: boolean;
+  device: string;
+  modelName: string;
+}
+
+export interface TripoSRStatus {
+  loaded: boolean;
   device: string;
   modelName: string;
 }
@@ -319,5 +325,160 @@ async function runImg2ImgWithProgress(
     throw error;
   } finally {
     stopProgress();
+  }
+}
+
+
+// =============================================================================
+// TripoSR 3D Mesh Generation API
+// =============================================================================
+
+/**
+ * Check TripoSR model status
+ */
+export async function checkTripoSRStatus(): Promise<TripoSRStatus | null> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/triposr/info`);
+    if (response.ok) {
+      const data = await response.json();
+      console.log(`TripoSR available: ${data.loaded ? 'loaded' : 'not loaded'} on ${data.device}`);
+      return {
+        loaded: data.loaded,
+        device: data.device,
+        modelName: data.model_name,
+      };
+    }
+  } catch (error) {
+    console.log('TripoSR not available');
+  }
+  
+  return null;
+}
+
+/**
+ * Load TripoSR model explicitly
+ */
+export async function loadTripoSRModel(): Promise<boolean> {
+  try {
+    const response = await fetch(`${BACKEND_URL}/api/triposr/load`, {
+      method: 'POST',
+    });
+    return response.ok;
+  } catch (error) {
+    console.error('Failed to load TripoSR model:', error);
+    return false;
+  }
+}
+
+/**
+ * Run TripoSR 3D mesh generation
+ */
+export async function runTripoSRBackend(
+  request: TripoSRRequest,
+  onProgress?: ProgressCallback
+): Promise<TripoSRResult> {
+  console.log('🔺 Starting TripoSR request');
+  console.log('  Input image:', request.inputImage.substring(0, 50) + '...');
+  console.log('  Foreground ratio:', request.foregroundRatio);
+  console.log('  MC Resolution:', request.mcResolution);
+  
+  // Simulate progress for mesh generation (typically takes 10-30 seconds)
+  let progressInterval: ReturnType<typeof setInterval> | null = null;
+  let currentStep = 0;
+  const totalSteps = 5; // Simplified progress steps
+  
+  if (onProgress) {
+    progressInterval = setInterval(() => {
+      if (currentStep < totalSteps - 1) {
+        currentStep++;
+        const stages = ['Loading model', 'Processing image', 'Extracting features', 'Generating mesh', 'Exporting GLB'];
+        onProgress({
+          step: currentStep,
+          totalSteps: totalSteps,
+          status: stages[currentStep] || 'processing',
+        });
+      }
+    }, 2000);
+  }
+  
+  try {
+    // Convert image to blob for upload
+    console.log('📦 Converting image to blob...');
+    const imageBlob = await imageUrlToBlob(request.inputImage);
+    console.log('  Blob size:', imageBlob.size, 'bytes');
+    
+    // Create form data
+    const formData = new FormData();
+    formData.append('image', imageBlob, 'input.png');
+    formData.append('foreground_ratio', String(request.foregroundRatio));
+    formData.append('mc_resolution', String(request.mcResolution));
+    formData.append('remove_bg', String(request.removeBackground));
+    
+    console.log('📡 Sending request to TripoSR backend...');
+    const response = await fetch(`${BACKEND_URL}/api/triposr`, {
+      method: 'POST',
+      body: formData,
+    });
+    
+    console.log('📬 Response status:', response.status);
+    
+    if (!response.ok) {
+      let errorMessage = `TripoSR error (${response.status})`;
+      try {
+        const errorData = await response.json();
+        errorMessage = errorData.detail || errorMessage;
+        console.error('❌ TripoSR error:', errorData);
+      } catch {
+        try {
+          const errorText = await response.text();
+          if (errorText) errorMessage = errorText;
+        } catch {
+          // Use status-based message
+        }
+      }
+      throw new Error(errorMessage);
+    }
+    
+    const result = await response.json();
+    console.log('✅ TripoSR response received');
+    console.log('  Time taken:', result.time_taken, 's');
+    console.log('  Mesh path:', result.mesh_path);
+    console.log('  Vertices:', result.vertices, 'Faces:', result.faces);
+    
+    // Send final progress
+    if (onProgress) {
+      onProgress({
+        step: totalSteps,
+        totalSteps: totalSteps,
+        status: 'complete',
+      });
+    }
+    
+    return {
+      meshPath: result.mesh_path,
+      previewUrl: result.preview_url,
+      outputPath: result.output_path,
+      timeTaken: result.time_taken * 1000, // Convert to ms
+      vertices: result.vertices,
+      faces: result.faces,
+    };
+    
+  } catch (error) {
+    console.error('❌ TripoSR error:', error);
+    if (onProgress) {
+      onProgress({
+        step: currentStep,
+        totalSteps: totalSteps,
+        status: 'error',
+      });
+    }
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error(`TripoSR inference failed: ${error}`);
+  } finally {
+    if (progressInterval) {
+      clearInterval(progressInterval);
+    }
   }
 }

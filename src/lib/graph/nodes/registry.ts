@@ -236,6 +236,99 @@ export const nodeRegistry: Record<string, ExtendedNodeDefinition> = {
       modelName: { type: 'string', group: 'model' },
     },
   },
+  
+  'triposr': {
+    type: 'triposr',
+    name: 'TripoSR',
+    category: 'Model',
+    inputs: [
+      { id: 'image', name: 'Image', type: 'image' },
+    ],
+    outputs: [
+      { id: 'mesh', name: 'Mesh', type: 'mesh' },
+    ],
+    defaultParams: {
+      // Model info
+      modelPath: '',
+      modelName: 'TripoSR Base',
+      // Generation parameters
+      foreground_ratio: 0.85,
+      mc_resolution: 256,
+      remove_background: true,
+    },
+    parameterMeta: {
+      // Mesh generation parameters
+      foreground_ratio: {
+        type: 'slider',
+        label: 'Foreground Ratio',
+        min: 0.5,
+        max: 1.0,
+        step: 0.05,
+        group: 'sampler',
+      },
+      mc_resolution: {
+        type: 'select',
+        label: 'Mesh Resolution',
+        options: [
+          { value: 128, label: '128 (Fast)' },
+          { value: 256, label: '256 (Balanced)' },
+          { value: 512, label: '512 (High Quality)' },
+        ],
+        group: 'sampler',
+      },
+      remove_background: {
+        type: 'boolean',
+        label: 'Auto Remove Background',
+        group: 'sampler',
+      },
+      // Hidden model params
+      modelPath: { type: 'string', group: 'model' },
+      modelName: { type: 'string', group: 'model' },
+    },
+  },
+  
+  'mesh-output': {
+    type: 'mesh-output',
+    name: '3D Output',
+    category: 'Output',
+    inputs: [
+      { id: 'mesh', name: 'Mesh', type: 'mesh' },
+    ],
+    outputs: [
+      { id: 'mesh', name: 'Mesh', type: 'mesh' }, // Allow chaining
+    ],
+    defaultParams: {
+      meshUrl: '',
+      previewUrl: '',
+      outputPath: '',
+      timeTaken: 0,
+      vertices: 0,
+      faces: 0,
+      generationParams: null,
+    },
+    parameterMeta: {
+      outputPath: {
+        type: 'string',
+        label: 'Output Path',
+        group: 'output',
+      },
+      timeTaken: {
+        type: 'number',
+        label: 'Time (ms)',
+        group: 'output',
+      },
+      vertices: {
+        type: 'number',
+        label: 'Vertices',
+        group: 'output',
+      },
+      faces: {
+        type: 'number',
+        label: 'Faces',
+        group: 'output',
+      },
+    },
+  },
 };
 
 export function getNodeDefinition(type: string): NodeDefinition | undefined {
@@ -250,6 +343,8 @@ export function getNodeColor(type: string): [number, number, number, number] {
     'image': [0.3, 0.7, 0.9, 1.0],     // Blue - Image Input
     'model': [0.9, 0.4, 0.6, 1.0],     // Pink - Model
     'output': [0.2, 0.8, 0.4, 1.0],    // Green - Output result
+    'triposr': [0.4, 0.7, 0.9, 1.0],   // Cyan - 3D Model
+    'mesh-output': [0.3, 0.9, 0.7, 1.0], // Teal - 3D Output result
   };
   
   return colors[type] ?? [0.5, 0.5, 0.5, 1.0];

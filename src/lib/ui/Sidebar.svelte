@@ -5,6 +5,11 @@
   import { listFiles, formatFileSize, type FileInfo } from '../services/file-service';
   import { router, type Page } from '../router.svelte';
   import Panel from './Panel.svelte';
+  import MeshViewer from './MeshViewer.svelte';
+  
+  // State for 3D mesh preview modal
+  let previewMeshUrl = $state<string | null>(null);
+  let previewMeshName = $state<string>('');
   
   function navigateTo(page: Page) {
     router.navigate(page);
@@ -55,6 +60,23 @@
   let canvasFiles = $state<FileInfo[]>([]);
   let isLoading = $state(false);
 
+  // Known directory-based models (not discovered via file listing)
+  // These models exist in subdirectories with their own structure
+  const knownDirectoryModels: FileInfo[] = [
+    {
+      name: 'triposr-base',
+      path: '/data/models/triposr-base',
+      size: 0, // Directory-based model
+      modified: new Date().toISOString(),
+      type: 'triposr',
+      metadata: {
+        title: 'TripoSR',
+        description: 'Single-image to 3D mesh generation',
+        architecture: 'triposr',
+      }
+    }
+  ];
+
   // Refresh functions
   async function refreshAssets() {
     isLoading = true;
@@ -75,7 +97,10 @@
   async function refreshModels() {
     isLoading = true;
     try {
-      modelFiles = await listFiles('models');
+      // Get file-based models (safetensors, etc.)
+      const fileModels = await listFiles('models');
+      // Combine with known directory-based models
+      modelFiles = [...knownDirectoryModels, ...fileModels];
     } catch (error) {
       console.error('Error refreshing models:', error);
     } finally {
@@ -168,7 +193,9 @@
 
   // Click-to-add: dispatch event to add model to canvas
   function handleModelClick(file: FileInfo) {
-    window.dispatchEvent(new CustomEvent('sidebar-add-model', {
+    // Determine which event to dispatch based on model type
+    const eventName = file.type === 'triposr' ? 'sidebar-add-triposr' : 'sidebar-add-model';
+    window.dispatchEvent(new CustomEvent(eventName, {
       detail: {
         path: file.path,
         name: file.name,
@@ -343,25 +370,44 @@
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                   <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
-                <h3>No generated images</h3>
-                <p>Run the graph to generate images</p>
+                <h3>No generated assets</h3>
+                <p>Run the graph to generate images or 3D meshes</p>
               </div>
             {:else}
               <div class="file-grid">
                 {#each generatedFiles as file (file.name)}
-                  <button 
-                    class="file-card" 
-                    title={`${file.name} (${formatFileSize(file.size)})`}
-                    aria-label={`Add ${file.name} to canvas`}
-                    draggable="true"
-                    ondragstart={(e) => handleImageDragStart(e, file)}
-                    onclick={() => handleImageClick(file)}
-                    type="button"
-                  >
-                    <div class="file-thumbnail">
-                      <img src={file.path} alt={file.name} loading="lazy" draggable="false" />
-                    </div>
-                  </button>
+                  {#if file.type === 'glb' || file.type === 'gltf'}
+                    <button 
+                      class="file-card mesh-card" 
+                      title={`${file.name} (${formatFileSize(file.size)}) - Click to preview 3D model`}
+                      aria-label={`Preview ${file.name}`}
+                      type="button"
+                      onclick={() => { previewMeshUrl = file.path; previewMeshName = file.name; }}
+                    >
+                      <div class="file-thumbnail mesh-thumbnail">
+                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                          <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                          <line x1="12" y1="22.08" x2="12" y2="12" />
+                        </svg>
+                        <span class="mesh-label">3D</span>
+                      </div>
+                    </button>
+                  {:else}
+                    <button 
+                      class="file-card" 
+                      title={`${file.name} (${formatFileSize(file.size)})`}
+                      aria-label={`Add ${file.name} to canvas`}
+                      draggable="true"
+                      ondragstart={(e) => handleImageDragStart(e, file)}
+                      onclick={() => handleImageClick(file)}
+                      type="button"
+                    >
+                      <div class="file-thumbnail">
+                        <img src={file.path} alt={file.name} loading="lazy" draggable="false" />
+                      </div>
+                    </button>
+                  {/if}
                 {/each}
               </div>
             {/if}
@@ -419,24 +465,36 @@
                 <button 
                   class="file-item model-item" 
                   title={file.metadata?.description || file.name}
-                  aria-label={`Add ${file.name} to canvas`}
+                  aria-label={`Add ${file.metadata?.title || file.name} to canvas`}
                   draggable="true"
                   ondragstart={(e) => handleModelDragStart(e, file)}
                   onclick={() => handleModelClick(file)}
                   type="button"
                 >
-                  <div class="model-icon">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                      <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                      <path d="M2 17l10 5 10-5" />
-                      <path d="M2 12l10 5 10-5" />
-                    </svg>
+                  <div class="model-icon" class:triposr={file.type === 'triposr'}>
+                    {#if file.type === 'triposr'}
+                      <!-- 3D cube icon for TripoSR -->
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
+                        <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
+                        <line x1="12" y1="22.08" x2="12" y2="12" />
+                      </svg>
+                    {:else}
+                      <!-- Layer stack icon for SD/other models -->
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                        <path d="M2 17l10 5 10-5" />
+                        <path d="M2 12l10 5 10-5" />
+                      </svg>
+                    {/if}
                   </div>
                   <div class="model-info">
                     <span class="file-name">{file.metadata?.title || file.name}</span>
                     <div class="model-meta">
-                      <span class="model-type">{file.type.toUpperCase()}</span>
-                      <span class="file-size">{formatFileSize(file.size)}</span>
+                      <span class="model-type">{file.type === 'triposr' ? '3D' : file.type.toUpperCase()}</span>
+                      {#if file.size > 0}
+                        <span class="file-size">{formatFileSize(file.size)}</span>
+                      {/if}
                     </div>
                     {#if file.metadata?.hash || file.metadata?.date}
                       <div class="model-meta-extra">
@@ -447,6 +505,9 @@
                           <span class="model-date">{file.metadata.date}</span>
                         {/if}
                       </div>
+                    {/if}
+                    {#if file.metadata?.description}
+                      <div class="model-description">{file.metadata.description}</div>
                     {/if}
                   </div>
                 </button>
@@ -493,6 +554,37 @@
     </Panel>
     </div>
 </div>
+
+<!-- 3D Mesh Preview Modal -->
+{#if previewMeshUrl}
+  <div class="mesh-preview-modal" onclick={() => previewMeshUrl = null} onkeydown={(e) => e.key === 'Escape' && (previewMeshUrl = null)} role="button" tabindex="0">
+    <div class="mesh-preview-content" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="3D Preview">
+      <div class="mesh-preview-header">
+        <h3>3D Preview</h3>
+        <span class="mesh-filename">{previewMeshName}</span>
+        <button class="mesh-preview-close" onclick={() => previewMeshUrl = null} aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="mesh-preview-viewer">
+        <MeshViewer meshUrl={previewMeshUrl} width={400} height={350} autoRotate={true} />
+      </div>
+      <div class="mesh-preview-actions">
+        <a href={previewMeshUrl} download={previewMeshName} class="mesh-download-btn">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Download GLB
+        </a>
+      </div>
+    </div>
+  </div>
+{/if}
 
 <style>
   .sidebar-container {
@@ -765,6 +857,21 @@
     height: 18px;
   }
   
+  .model-icon.triposr {
+    background: rgba(16, 185, 129, 0.15);
+  }
+  
+  .model-icon.triposr svg {
+    color: #10b981;
+  }
+  
+  .model-description {
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.5);
+    margin-top: 2px;
+    line-height: 1.3;
+  }
+  
   .model-info {
     display: flex;
     flex-direction: column;
@@ -904,6 +1011,41 @@
     transform: scale(1.02);
   }
   
+  /* 3D Mesh card styling */
+  .mesh-card {
+    cursor: pointer;
+  }
+  
+  .mesh-thumbnail {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    background: linear-gradient(135deg, #1e3a5f 0%, #1a2a3f 100%);
+    color: #4da6ff;
+  }
+  
+  .mesh-thumbnail svg {
+    opacity: 0.8;
+  }
+  
+  .mesh-label {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    opacity: 0.8;
+  }
+  
+  .mesh-card:hover .mesh-thumbnail {
+    background: linear-gradient(135deg, #234b75 0%, #1e3a5f 100%);
+  }
+  
+  .mesh-card:hover .mesh-thumbnail svg {
+    opacity: 1;
+  }
+  
   /* Hidden by default - only shown when needed */
   .file-info {
     display: none;
@@ -939,5 +1081,124 @@
     to {
       transform: rotate(360deg);
     }
+  }
+  
+  /* 3D Mesh Preview Modal */
+  .mesh-preview-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.2s ease-out;
+  }
+  
+  @keyframes fadeIn {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  
+  .mesh-preview-content {
+    background: var(--surface-elevated, #1a1a1f);
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    animation: scaleIn 0.2s ease-out;
+    max-width: 90vw;
+    max-height: 90vh;
+  }
+  
+  @keyframes scaleIn {
+    from {
+      transform: scale(0.95);
+      opacity: 0;
+    }
+    to {
+      transform: scale(1);
+      opacity: 1;
+    }
+  }
+  
+  .mesh-preview-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(0, 0, 0, 0.2);
+  }
+  
+  .mesh-preview-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary, #fff);
+  }
+  
+  .mesh-filename {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  .mesh-preview-close {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.6);
+    transition: all 0.15s ease;
+  }
+  
+  .mesh-preview-close:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+  }
+  
+  .mesh-preview-viewer {
+    padding: 0;
+  }
+  
+  .mesh-preview-actions {
+    display: flex;
+    justify-content: center;
+    padding: 12px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+  
+  .mesh-download-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: var(--accent-primary, #6366f1);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    text-decoration: none;
+    transition: all 0.15s ease;
+  }
+  
+  .mesh-download-btn:hover {
+    background: var(--accent-primary-hover, #5855e0);
+    transform: translateY(-1px);
   }
 </style>

@@ -2,7 +2,7 @@
  * Core types for the node graph system
  */
 
-export type PortType = 'string' | 'image' | 'tensor' | 'number' | 'any';
+export type PortType = 'string' | 'image' | 'tensor' | 'number' | 'mesh' | 'any';
 
 export interface Port {
   id: string;

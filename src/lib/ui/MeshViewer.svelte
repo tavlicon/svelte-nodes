@@ -1,0 +1,302 @@
+<script lang="ts">
+  import { onMount, onDestroy } from 'svelte';
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+  
+  // Props
+  let {
+    meshUrl = '',
+    width = 200,
+    height = 200,
+    autoRotate = true,
+    backgroundColor = 0x1a1a1f,
+  }: {
+    meshUrl?: string;
+    width?: number;
+    height?: number;
+    autoRotate?: boolean;
+    backgroundColor?: number;
+  } = $props();
+  
+  // Container ref
+  let container: HTMLDivElement;
+  
+  // Three.js objects
+  let scene: THREE.Scene;
+  let camera: THREE.PerspectiveCamera;
+  let renderer: THREE.WebGLRenderer;
+  let controls: OrbitControls;
+  let mesh: THREE.Object3D | null = null;
+  let animationId: number;
+  let isInitialized = false;
+  
+  // Loading state
+  let isLoading = $state(false);
+  let error = $state<string | null>(null);
+  
+  function init() {
+    if (!container || isInitialized) return;
+    
+    // Scene
+    scene = new THREE.Scene();
+    scene.background = new THREE.Color(backgroundColor);
+    
+    // Camera
+    camera = new THREE.PerspectiveCamera(50, width / height, 0.1, 1000);
+    camera.position.set(2, 1.5, 2);
+    
+    // Renderer
+    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1;
+    container.appendChild(renderer.domElement);
+    
+    // Controls
+    controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.05;
+    controls.autoRotate = autoRotate;
+    controls.autoRotateSpeed = 2;
+    controls.enableZoom = true;
+    controls.enablePan = false;
+    controls.minDistance = 1;
+    controls.maxDistance = 10;
+    
+    // Lighting
+    const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+    scene.add(ambientLight);
+    
+    const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+    directionalLight.position.set(5, 5, 5);
+    scene.add(directionalLight);
+    
+    const backLight = new THREE.DirectionalLight(0xffffff, 0.3);
+    backLight.position.set(-5, 3, -5);
+    scene.add(backLight);
+    
+    // Add a subtle grid for reference
+    const gridHelper = new THREE.GridHelper(2, 10, 0x444444, 0x333333);
+    gridHelper.position.y = -0.5;
+    scene.add(gridHelper);
+    
+    isInitialized = true;
+    
+    // Start animation loop
+    animate();
+  }
+  
+  function animate() {
+    animationId = requestAnimationFrame(animate);
+    
+    if (controls) {
+      controls.update();
+    }
+    
+    if (renderer && scene && camera) {
+      renderer.render(scene, camera);
+    }
+  }
+  
+  async function loadMesh(url: string) {
+    if (!url || !isInitialized) return;
+    
+    isLoading = true;
+    error = null;
+    
+    // Remove existing mesh
+    if (mesh) {
+      scene.remove(mesh);
+      mesh = null;
+    }
+    
+    try {
+      const loader = new GLTFLoader();
+      
+      // Handle relative URLs
+      let loadUrl = url;
+      if (url.startsWith('/')) {
+        loadUrl = url; // Use as-is for relative paths
+      }
+      
+      const gltf = await loader.loadAsync(loadUrl);
+      mesh = gltf.scene;
+      
+      // Center and scale the mesh
+      const box = new THREE.Box3().setFromObject(mesh);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+      
+      // Center the mesh
+      mesh.position.sub(center);
+      
+      // Scale to fit in view
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const scale = 1.5 / maxDim;
+      mesh.scale.setScalar(scale);
+      
+      // Add to scene
+      scene.add(mesh);
+      
+      // Reset camera position
+      camera.position.set(2, 1.5, 2);
+      controls.target.set(0, 0, 0);
+      controls.update();
+      
+    } catch (e) {
+      console.error('Failed to load mesh:', e);
+      error = e instanceof Error ? e.message : 'Failed to load 3D model';
+    } finally {
+      isLoading = false;
+    }
+  }
+  
+  function resize(newWidth: number, newHeight: number) {
+    if (!isInitialized) return;
+    
+    camera.aspect = newWidth / newHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(newWidth, newHeight);
+  }
+  
+  function cleanup() {
+    if (animationId) {
+      cancelAnimationFrame(animationId);
+    }
+    
+    if (controls) {
+      controls.dispose();
+    }
+    
+    if (renderer) {
+      renderer.dispose();
+      if (container && renderer.domElement) {
+        container.removeChild(renderer.domElement);
+      }
+    }
+    
+    if (mesh) {
+      scene.remove(mesh);
+    }
+    
+    isInitialized = false;
+  }
+  
+  // Initialize on mount
+  onMount(() => {
+    init();
+    if (meshUrl) {
+      loadMesh(meshUrl);
+    }
+  });
+  
+  // Watch for meshUrl changes
+  $effect(() => {
+    if (meshUrl && isInitialized) {
+      loadMesh(meshUrl);
+    }
+  });
+  
+  // Watch for size changes
+  $effect(() => {
+    if (isInitialized) {
+      resize(width, height);
+    }
+  });
+  
+  // Cleanup on destroy
+  onDestroy(() => {
+    cleanup();
+  });
+</script>
+
+<div 
+  class="mesh-viewer" 
+  bind:this={container}
+  style:width="{width}px"
+  style:height="{height}px"
+>
+  {#if isLoading}
+    <div class="loading-overlay">
+      <div class="spinner"></div>
+      <span>Loading 3D model...</span>
+    </div>
+  {/if}
+  
+  {#if error}
+    <div class="error-overlay">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <circle cx="12" cy="12" r="10" />
+        <line x1="12" y1="8" x2="12" y2="12" />
+        <line x1="12" y1="16" x2="12.01" y2="16" />
+      </svg>
+      <span>{error}</span>
+    </div>
+  {/if}
+  
+  {#if !meshUrl}
+    <div class="placeholder">
+      <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" />
+        <path d="M2 17l10 5 10-5" />
+        <path d="M2 12l10 5 10-5" />
+      </svg>
+      <span>No mesh loaded</span>
+    </div>
+  {/if}
+</div>
+
+<style>
+  .mesh-viewer {
+    position: relative;
+    border-radius: var(--radius-md, 8px);
+    overflow: hidden;
+    background: #1a1a1f;
+  }
+  
+  .mesh-viewer :global(canvas) {
+    display: block;
+    border-radius: inherit;
+  }
+  
+  .loading-overlay,
+  .error-overlay,
+  .placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(26, 26, 31, 0.9);
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 12px;
+  }
+  
+  .spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid rgba(255, 255, 255, 0.2);
+    border-top-color: var(--accent-primary, #6366f1);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  
+  .error-overlay {
+    color: var(--error, #ef4444);
+  }
+  
+  .placeholder svg {
+    opacity: 0.4;
+  }
+</style>

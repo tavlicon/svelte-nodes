@@ -83,7 +83,10 @@ A comprehensive guide to the Generative Design Studio architecture.
 │  data/                                                                  │
 │  ├── input/      → Uploaded images (.png, .jpg, .webp, etc.)           │
 │  ├── models/     → AI models (.safetensors, .onnx, .pt, .ckpt)         │
-│  ├── output/     → Generated images                                    │
+│  │   ├── sd-v1-5-local/  → Stable Diffusion 1.5 (Diffusers format)     │
+│  │   ├── triposr-base/   → TripoSR model (single-image to 3D)          │
+│  │   └── dino-vitb16/    → DINOv2 encoder for TripoSR                  │
+│  ├── output/     → Generated images (.png) and 3D meshes (.glb)        │
 │  └── canvases/   → Saved workflows (.json)                             │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -98,11 +101,12 @@ The UI is built with Svelte 5 using the new runes API (`$state`, `$derived`, `$e
 
 | Component | File | Purpose |
 |-----------|------|---------|
-| **Canvas** | `Canvas.svelte` | Main canvas with pointer events, DOM overlays, SVG edges, zoom/pan |
-| **Sidebar** | `Sidebar.svelte` | Asset browser (images, models, canvases) with drag-drop & click-to-add |
+| **Canvas** | `Canvas.svelte` | Main canvas with pointer events, DOM overlays (images, meshes), SVG edges, zoom/pan |
+| **Sidebar** | `Sidebar.svelte` | Asset browser (images, models, GLB meshes) with drag-drop, click-to-add, 3D preview modal |
 | **Toolbar** | `Toolbar.svelte` | Zoom controls, undo/redo buttons, theme toggle |
-| **NodePanel** | `NodePanel.svelte` | Properties panel for selected node |
+| **NodePanel** | `NodePanel.svelte` | Properties panel for selected node (includes 3D preview for mesh outputs) |
 | **ParameterEditor** | `ParameterEditor.svelte` | Dynamic form for node parameters |
+| **MeshViewer** | `MeshViewer.svelte` | Three.js-based GLB viewer with orbit controls, auto-rotate |
 
 #### Key Patterns
 
@@ -202,13 +206,15 @@ Defines available node types:
 | `prompt` | Input | — | `text: string` |
 | `image` | Input | — | `image: image` |
 | `model` | Model | `prompt`, `image` | `image` |
+| `triposr` | Model | `image` | `mesh` |
 | `sdxl-turbo` | Generate | `prompt`, `negative_prompt` | `image` |
 | `image-display` | Output | `image` | — |
+| `mesh-output` | Output | `mesh` | — |
 
 #### Port Types
 
 ```typescript
-type PortType = 'string' | 'image' | 'tensor' | 'number' | 'any';
+type PortType = 'string' | 'image' | 'tensor' | 'number' | 'mesh' | 'any';
 
 // Compatibility check
 function arePortsCompatible(outputType, inputType): boolean {
@@ -223,10 +229,11 @@ function arePortsCompatible(outputType, inputType): boolean {
 
 #### Inference Manager (`inference/manager.ts`)
 
-Coordinates inference requests across workers.
+Coordinates inference requests across workers and backend APIs.
 
 ```typescript
-interface InferenceRequest {
+// SD 1.5 img2img request
+interface Img2ImgRequest {
   prompt: string;
   negativePrompt?: string;
   steps: number;
@@ -236,16 +243,29 @@ interface InferenceRequest {
   seed: number;
 }
 
+// TripoSR 3D mesh request
+interface TripoSRRequest {
+  inputImage: string;       // Data URL or file path
+  device?: string;          // 'mps' | 'cuda' | 'cpu'
+  mcResolution?: number;    // Marching cubes resolution (256/512)
+  removeBackground?: boolean;
+  foregroundRatio?: number; // 0.0-1.0
+}
+
 class InferenceManager {
-  // Queue requests
-  async runInference(request, onProgress?): Promise<InferenceResult>
+  // Run SD 1.5 img2img
+  async runImg2Img(request, onProgress?): Promise<Img2ImgResult>
   
-  // Load model into worker
+  // Run TripoSR 3D generation
+  async runTripoSR(request, onProgress?): Promise<TripoSRResult>
+  
+  // Load models
   async loadModel(): Promise<void>
+  async loadTripoSR(): Promise<void>
   
   // Check status
   isModelLoaded(): boolean
-  isLoading(): boolean
+  isTripoSRLoaded(): boolean
 }
 ```
 
@@ -300,17 +320,21 @@ Browser-side storage (scaffolded):
 - Execution Engine with topological sort and dirty tracking
 - InferenceManager with queue, progress callbacks, worker messaging
 - Web Worker scaffold with ONNX Runtime imported
-- Node Registry with model node type defined
-- Port System with type compatibility checking
+- Node Registry with model node types defined (SD 1.5, TripoSR)
+- Port System with type compatibility checking (including `mesh` type)
 - File System for loading models from `data/models/`
+- **SD 1.5 img2img** – Full pipeline via Python backend (Diffusers)
+- **TripoSR 3D mesh** – Single-image to GLB via Python backend
+- **3D Mesh Viewer** – Three.js-based viewer for GLB files (MeshViewer.svelte)
+- **GLB Output** – Auto-saves to `data/output/` with preview in sidebar
 
-### 🚧 Needs Implementation
+### 🚧 Future Enhancements
 
-- **Actual ONNX Model Loading** – Replace `loadModel()` stub
-- **Pipeline Orchestration** – text encoder → U-Net → VAE decoder
-- **Proper CLIP BPE Tokenizer** – Currently using placeholder hash
-- **Real Diffusion Loop** – Scheduler, latent manipulation
-- **Model-Specific Nodes** – SD 1.5, SDXL, ControlNet, LoRA
+- **Browser-side ONNX** – WebGPU inference for smaller models
+- **Pipeline Orchestration** – text encoder → U-Net → VAE decoder (browser)
+- **Model-Specific Nodes** – SDXL, ControlNet, LoRA adapters
+- **Preview Images** – Generate 2D thumbnail renders from 3D meshes
+- **Mesh Editing** – Basic mesh manipulation nodes
 
 ---
 
@@ -399,11 +423,13 @@ src/lib/
 │   └── camera.ts          # Camera math
 ├── graph/
 │   ├── store.svelte.ts    # Yjs-backed store
-│   ├── execution.ts       # DAG execution engine
-│   ├── types.ts           # Core types
-│   └── nodes/registry.ts  # Node definitions
+│   ├── execution.ts       # DAG execution engine (includes TripoSR)
+│   ├── types.ts           # Core types (includes mesh port type)
+│   └── nodes/registry.ts  # Node definitions (SD 1.5, TripoSR)
 ├── inference/
-│   ├── manager.ts         # Inference coordinator
+│   ├── manager.ts         # Inference coordinator (img2img + TripoSR)
+│   ├── api-client.ts      # Backend API client (img2img + TripoSR)
+│   ├── types.ts           # Request/response types
 │   ├── onnx.ts            # ONNX utilities
 │   └── sdxl-turbo.ts      # Pipeline stub
 ├── persistence/
@@ -412,12 +438,18 @@ src/lib/
 ├── services/
 │   └── file-service.ts    # File API client
 ├── ui/
-│   ├── Canvas.svelte      # Main canvas
-│   ├── Sidebar.svelte     # Asset browser
+│   ├── Canvas.svelte      # Main canvas (image + mesh overlays)
+│   ├── Sidebar.svelte     # Asset browser (3D preview modal)
 │   ├── Toolbar.svelte     # Top toolbar
-│   ├── NodePanel.svelte   # Properties panel
+│   ├── NodePanel.svelte   # Properties panel (3D viewer)
+│   ├── MeshViewer.svelte  # Three.js GLB viewer component
 │   └── theme.svelte.ts    # Theme state
 └── workers/
     ├── inference.worker.ts # AI worker
     └── preview.worker.ts   # Preview worker
+
+backend/
+├── server.py              # FastAPI server (SD 1.5 + TripoSR)
+├── requirements.txt       # Python dependencies
+└── venv/                  # Python virtual environment
 ```

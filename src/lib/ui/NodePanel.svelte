@@ -3,6 +3,7 @@
   import { nodeRegistry, type ExtendedNodeDefinition } from '../graph/nodes/registry';
   import ParameterEditor from './ParameterEditor.svelte';
   import Panel from './Panel.svelte';
+  import MeshViewer from './MeshViewer.svelte';
   
   // Get first selected node
   let selectedNode = $derived.by(() => {
@@ -107,7 +108,33 @@
         {/if}
       </section>
       
-      {#if selectedNode.thumbnailUrl}
+      {#if selectedNode.type === 'mesh-output' || selectedNode.type === 'triposr'}
+        <section class="preview-section">
+          <h3 class="section-title">3D Preview</h3>
+          <div class="preview-mesh">
+            <MeshViewer 
+              meshUrl={selectedNode.params.meshUrl as string || ''} 
+              width={272}
+              height={200}
+              autoRotate={true}
+            />
+          </div>
+          {#if selectedNode.params.meshUrl}
+            <a 
+              class="download-btn"
+              href={selectedNode.params.meshUrl as string}
+              download
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" y1="15" x2="12" y2="3" />
+              </svg>
+              Download GLB
+            </a>
+          {/if}
+        </section>
+      {:else if selectedNode.thumbnailUrl}
         <section class="preview-section">
           <h3 class="section-title">Preview</h3>
           <div class="preview-image">
@@ -121,9 +148,34 @@
           <h3 class="section-title">Output Location</h3>
           <div class="output-path">
             <code class="path-text">{selectedNode.params.outputPath}</code>
+          </div>
+        </section>
+      {/if}
+        
+      {#if selectedNode.type === 'mesh-output' && selectedNode.params.outputPath}
+        <section class="output-section">
+          <h3 class="section-title">Mesh Info</h3>
+          <div class="mesh-stats">
+            <div class="stat-row">
+              <span class="stat-label">Vertices</span>
+              <span class="stat-value">{selectedNode.params.vertices?.toLocaleString() || 0}</span>
             </div>
-          </section>
-        {/if}
+            <div class="stat-row">
+              <span class="stat-label">Faces</span>
+              <span class="stat-value">{selectedNode.params.faces?.toLocaleString() || 0}</span>
+            </div>
+            {#if selectedNode.params.timeTaken}
+              <div class="stat-row">
+                <span class="stat-label">Generation Time</span>
+                <span class="stat-value">{(selectedNode.params.timeTaken as number / 1000).toFixed(2)}s</span>
+              </div>
+            {/if}
+          </div>
+          <div class="output-path">
+            <code class="path-text">{selectedNode.params.outputPath}</code>
+          </div>
+        </section>
+      {/if}
         
         {#if selectedNode.type === 'output' && selectedNode.params.generationParams}
           {@const params = selectedNode.params.generationParams as Record<string, unknown>}
@@ -312,6 +364,65 @@
     width: 100%;
     height: 100%;
     object-fit: contain;
+  }
+  
+  .preview-mesh {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+  }
+  
+  .download-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    margin-top: 8px;
+    padding: 8px 12px;
+    background: var(--accent-glow);
+    border: 1px solid var(--accent-primary);
+    border-radius: var(--radius-md);
+    color: var(--accent-primary);
+    font-size: 11px;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  
+  .download-btn:hover {
+    background: var(--accent-primary);
+    color: white;
+  }
+  
+  .mesh-stats {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 8px 10px;
+    margin-bottom: 8px;
+  }
+  
+  .stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 4px 0;
+  }
+  
+  .stat-row:not(:last-child) {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  
+  .stat-label {
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  
+  .stat-value {
+    font-size: 11px;
+    font-weight: 600;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
   }
   
   .output-path {

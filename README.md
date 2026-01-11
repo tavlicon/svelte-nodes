@@ -8,8 +8,10 @@ A node-based canvas editor for building AI image generation workflows. Built wit
 - **WebGPU/Canvas2D Rendering**: Hardware-accelerated rendering with automatic fallback
 - **Visual Connections**: Bezier curve connectors with snap-to-port and type validation
 - **SD 1.5 img2img**: Local Stable Diffusion inference using Diffusers library
+- **TripoSR 3D Mesh**: Single-image to 3D mesh generation with GLB export
+- **3D Viewer**: Interactive Three.js viewer for generated meshes
 - **Output Node**: Auto-generated output node shows result with file path
-- **Asset Management**: Drag and drop images and models from sidebar or desktop
+- **Asset Management**: Drag and drop images, models, and 3D meshes from sidebar
 - **Undo/Redo**: 5-level history with keyboard shortcuts (⌘Z / ⇧⌘Z)
 - **Light/Dark Theme**: Toggle between themes with persistent preference
 - **Local File Storage**: All assets stored locally in `data/` directory
@@ -25,10 +27,10 @@ A node-based canvas editor for building AI image generation workflows. Built wit
 │  │   FRONTEND       │  HTTP   │   BACKEND (Python)           │ │
 │  │   (Svelte 5)     │ ──────► │   FastAPI + Diffusers        │ │
 │  │                  │         │                              │ │
-│  │  • Node Editor   │         │  • Loads SD 1.5 model        │ │
-│  │  • WebGPU Canvas │         │  • Runs on MPS/CUDA/CPU      │ │
-│  │  • Parameters    │         │  • img2img inference         │ │
-│  │  • Output Display│ ◄────── │  • Returns generated image   │ │
+│  │  • Node Editor   │         │  • SD 1.5 img2img            │ │
+│  │  • WebGPU Canvas │         │  • TripoSR 3D mesh           │ │
+│  │  • Parameters    │         │  • Runs on MPS/CUDA/CPU      │ │
+│  │  • 3D Viewer     │ ◄────── │  • Returns images + GLB      │ │
 │  └──────────────────┘         └──────────────────────────────┘ │
 │        localhost:5173              localhost:8000              │
 └─────────────────────────────────────────────────────────────────┘
@@ -44,13 +46,16 @@ A node-based canvas editor for building AI image generation workflows. Built wit
   - Chrome 113+, Edge 113+, Safari 18+
 - Falls back to Canvas 2D for older browsers
 
+### Frontend Dependencies
+- **Three.js** – 3D rendering for GLB mesh viewer
+
 ### Backend
 - Python 3.10+
-- ~8GB RAM (for model loading)
+- ~10GB RAM (for loading SD 1.5 + TripoSR models)
 - GPU recommended:
   - **Apple Silicon** (M1/M2/M3): Uses MPS acceleration
   - **NVIDIA GPU**: Uses CUDA acceleration
-  - **CPU**: Works but slower (~30s/image)
+  - **CPU**: Works but slower (~30s/image, ~60s/mesh)
 
 ## Quick Start
 
@@ -102,6 +107,24 @@ Download links (from `runwayml/stable-diffusion-v1-5`):
 - All config files: https://huggingface.co/runwayml/stable-diffusion-v1-5/tree/main
 - Model weights: Download the `.safetensors` files for each component
 
+### 3b. Download TripoSR Model (Optional - for 3D mesh generation)
+
+For single-image to 3D mesh generation, download these models:
+
+```
+data/models/
+├── triposr-base/         # From stabilityai/TripoSR
+│   ├── config.yaml
+│   └── model.ckpt        # ~1.3 GB
+└── dino-vitb16/          # DINOv2 encoder
+    ├── config.json
+    └── model.safetensors # ~330 MB
+```
+
+Download from HuggingFace:
+- TripoSR: https://huggingface.co/stabilityai/TripoSR
+- DINOv2: https://huggingface.co/facebook/dino-vitb16
+
 ### 4. Start the Backend
 
 ```bash
@@ -134,7 +157,7 @@ The toolbar will show backend status:
 ### Creating an img2img Workflow
 
 1. **Add Input Image**: Click Assets → Imported → Click an image to add to canvas
-2. **Add Model Node**: Click Models → Click the model to add
+2. **Add Model Node**: Click Models → Click "Stable Diffusion v1.5" to add
 3. **Connect Nodes**: Drag from Image output (right) → Model input (left)
 4. **Configure Parameters**:
    - **Positive Prompt**: What you want to see
@@ -143,11 +166,32 @@ The toolbar will show backend status:
    - **CFG Scale**: Prompt strength (1-20)
    - **Sampler**: LCM (fast), Euler, DPM++, etc.
    - **Denoise**: How much to change (0-1, higher = more change)
-5. **Run**: Click **▶ Run** in toolbar
+5. **Run**: Click **▶ Generate** in toolbar
 6. **Output**: An Output node appears automatically showing:
    - Generated image preview
    - File path in `data/output/`
    - Generation time
+
+### Creating a 3D Mesh from Image (TripoSR)
+
+1. **Add Input Image**: Click Assets → Imported → Click an image (works best with single objects on simple backgrounds)
+2. **Add TripoSR Node**: Click Models → Click "TripoSR" to add
+3. **Configure Parameters**:
+   - **Foreground Ratio**: How much of the image is the subject (0.5-1.0)
+   - **Mesh Resolution**: 256 (fast) or 512 (high quality)
+   - **Auto Remove Background**: Enable for better results
+4. **Run**: Click **▶ Generate** in toolbar
+5. **Output**: A 3D Output node appears showing:
+   - Interactive 3D preview (rotate with mouse)
+   - Download GLB button
+   - Mesh info (vertices, faces, generation time)
+   - File path in `data/output/`
+
+### Viewing Generated 3D Meshes
+
+- **Sidebar**: Assets → Generated → Click a GLB file to open 3D preview modal
+- **Node Panel**: Select a 3D Output node to see interactive 3D viewer
+- **Download**: Click "Download GLB" to save mesh file
 
 ### Keyboard Shortcuts
 
@@ -167,33 +211,41 @@ The toolbar will show backend status:
 
 | Type | Category | Description |
 |------|----------|-------------|
-| **Image** | Input | Source image for img2img |
+| **Image** | Input | Source image for img2img or 3D generation |
 | **Model** | Model | SD 1.5 img2img processor with prompts & sampler params |
+| **TripoSR** | Model | Single-image to 3D mesh (GLB) generator |
 | **Output** | Output | Auto-created, shows generated image and file path |
+| **3D Output** | Output | Auto-created, shows generated mesh with 3D viewer |
 
 ## Project Structure
 
 ```
 ├── backend/              # Python inference server
-│   ├── server.py        # FastAPI server with Diffusers
-│   ├── requirements.txt # Python dependencies
+│   ├── server.py        # FastAPI server (SD 1.5 + TripoSR)
+│   ├── requirements.txt # Python dependencies (diffusers, trimesh, rembg, etc.)
 │   └── venv/            # Python virtual environment
 ├── data/                 # Local storage (gitignored contents)
 │   ├── input/           # Uploaded images
 │   ├── models/          # AI models
-│   │   └── sd-v1-5-local/  # Diffusers-format SD 1.5
-│   ├── output/          # Generated images (img2img_TIMESTAMP_SEED.png)
+│   │   ├── sd-v1-5-local/   # Diffusers-format SD 1.5
+│   │   ├── triposr-base/    # TripoSR model
+│   │   └── dino-vitb16/     # DINOv2 encoder
+│   ├── output/          # Generated images (.png) and meshes (.glb)
 │   └── canvases/        # Saved workflows
 ├── src/
 │   ├── lib/
 │   │   ├── canvas/      # WebGPU/Canvas2D rendering
 │   │   ├── graph/       # Node graph logic & store
-│   │   │   ├── execution.ts   # Topological execution engine
+│   │   │   ├── execution.ts   # Execution engine (img2img + TripoSR)
 │   │   │   ├── store.svelte.ts # Yjs-backed reactive store
-│   │   │   └── nodes/registry.ts # Node type definitions
+│   │   │   └── nodes/registry.ts # Node definitions (SD, TripoSR)
 │   │   ├── inference/   # Backend communication
-│   │   │   └── manager.ts # HTTP client for img2img API
+│   │   │   ├── manager.ts     # Inference coordinator
+│   │   │   ├── api-client.ts  # HTTP client for all backend APIs
+│   │   │   └── types.ts       # Request/response types
 │   │   ├── ui/          # Svelte components
+│   │   │   ├── MeshViewer.svelte  # Three.js GLB viewer
+│   │   │   └── ...
 │   │   └── workers/     # Web Workers (fallback)
 │   └── main.ts
 └── index.html
@@ -234,6 +286,34 @@ Returns:
 }
 ```
 
+### `GET /api/triposr/info`
+Returns TripoSR model status:
+```json
+{
+  "loaded": true,
+  "model_name": "triposr-base",
+  "device": "mps"
+}
+```
+
+### `POST /api/triposr`
+Generates 3D mesh from image. Form data:
+- `image`: Input image file
+- `mc_resolution`: Marching cubes resolution (256 or 512)
+- `foreground_ratio`: Subject ratio (0.0-1.0)
+- `remove_background`: Auto background removal (boolean)
+
+Returns:
+```json
+{
+  "mesh_url": "/data/output/mesh_123456_abc123.glb",
+  "output_path": "/path/to/data/output/mesh_123456_abc123.glb",
+  "time_taken": 1.2,
+  "vertices": 642,
+  "faces": 1280
+}
+```
+
 ## Troubleshooting
 
 ### 403 WebSocket Errors in Terminal
@@ -270,7 +350,22 @@ If frontend shows "SIMULATION" instead of "MPS/CUDA":
 2. Check backend loaded model: look for "✅ Model loaded" in server logs
 3. Refresh frontend page
 
+### TripoSR Not Working
+
+1. Ensure TripoSR model files are in `data/models/triposr-base/`
+2. Ensure DINO encoder is in `data/models/dino-vitb16/`
+3. Check backend logs for: `✅ TripoSR model loaded`
+4. Test endpoint: `curl http://localhost:8000/api/triposr/info`
+
+### 3D Preview Not Showing
+
+1. Ensure Three.js is installed: `npm install three @types/three`
+2. Clear browser cache and reload
+3. Check browser console for WebGL errors
+
 ## Performance
+
+### SD 1.5 img2img
 
 | Hardware | Speed | Notes |
 |----------|-------|-------|
@@ -282,6 +377,19 @@ Tips:
 - Use fewer steps (3-10 with LCM sampler)
 - Lower CFG scale (2-4 with LCM)
 - Use 512x512 input images
+
+### TripoSR 3D Mesh
+
+| Hardware | Speed | Notes |
+|----------|-------|-------|
+| Apple M1/M2/M3 | ~1-2s/mesh | Very fast on MPS |
+| NVIDIA RTX 3080+ | ~0.5-1s/mesh | Uses CUDA, float16 |
+| CPU | ~5-10s/mesh | Slower but workable |
+
+Tips:
+- Use images with single objects and clean backgrounds
+- Enable "Auto Remove Background" for better results
+- Use 256 resolution for fast previews, 512 for final output
 
 ## Development
 

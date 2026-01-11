@@ -8,17 +8,21 @@
  * - Manages status state
  */
 
-import { checkBackendStatus, runImg2ImgBackend, type BackendStatus } from './api-client';
+import { checkBackendStatus, runImg2ImgBackend, checkTripoSRStatus, runTripoSRBackend, type BackendStatus, type TripoSRStatus } from './api-client';
 import { FallbackHandler } from './fallback-handler';
-import type { InferenceRequest, Img2ImgRequest, InferenceResult, ProgressCallback } from './types';
+import type { InferenceRequest, Img2ImgRequest, InferenceResult, ProgressCallback, TripoSRRequest, TripoSRResult } from './types';
 
 // Re-export types for consumers
-export type { InferenceRequest, Img2ImgRequest, InferenceResult, InferenceProgress, ProgressCallback } from './types';
+export type { InferenceRequest, Img2ImgRequest, InferenceResult, InferenceProgress, ProgressCallback, TripoSRRequest, TripoSRResult } from './types';
 
 class InferenceManager {
   private backendAvailable = false;
   private modelLoaded = false;
   private currentDevice = 'unknown';
+  
+  // TripoSR status
+  private triposrAvailable = false;
+  private triposrLoaded = false;
   
   // Fallback handler for when backend is not available
   private fallbackHandler = new FallbackHandler();
@@ -121,6 +125,48 @@ class InferenceManager {
   
   getDevice(): string {
     return this.currentDevice;
+  }
+  
+  /**
+   * Check TripoSR availability
+   */
+  async checkTripoSRStatus(): Promise<TripoSRStatus | null> {
+    const status = await checkTripoSRStatus();
+    if (status) {
+      this.triposrAvailable = true;
+      this.triposrLoaded = status.loaded;
+    }
+    return status;
+  }
+  
+  /**
+   * Run TripoSR 3D mesh generation
+   */
+  async runTripoSR(
+    request: TripoSRRequest,
+    onProgress?: ProgressCallback
+  ): Promise<TripoSRResult> {
+    // Check backend status first
+    await this.refreshStatus();
+    
+    console.log('🔺 runTripoSR called');
+    console.log('  Backend available:', this.backendAvailable);
+    
+    if (!this.backendAvailable) {
+      throw new Error('Backend not available. Please start the Python backend server.');
+    }
+    
+    // TripoSR runs on backend only (no fallback)
+    console.log('✅ Using Python backend for TripoSR inference');
+    return runTripoSRBackend(request, onProgress);
+  }
+  
+  isTripoSRAvailable(): boolean {
+    return this.triposrAvailable;
+  }
+  
+  isTripoSRLoaded(): boolean {
+    return this.triposrLoaded;
   }
   
   destroy(): void {

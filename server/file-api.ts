@@ -89,6 +89,10 @@ async function listFiles(directory: string): Promise<FileInfo[]> {
     case 'models':
       allowedExtensions = ['.safetensors', '.onnx', '.pt', '.pth', '.bin', '.ckpt'];
       break;
+    case 'output':
+      // Output includes both images and 3D meshes
+      allowedExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif', '.glb', '.gltf'];
+      break;
     default:
       allowedExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif'];
   }
@@ -183,6 +187,8 @@ export function fileApiPlugin(): Plugin {
               '.webp': 'image/webp',
               '.svg': 'image/svg+xml',
               '.avif': 'image/avif',
+              '.glb': 'model/gltf-binary',
+              '.gltf': 'model/gltf+json',
             };
             res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
             res.end(data);

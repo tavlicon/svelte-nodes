@@ -117,6 +117,7 @@
     // Listen for sidebar click-to-add events
     window.addEventListener('sidebar-add-image', handleSidebarAddImage as EventListener);
     window.addEventListener('sidebar-add-model', handleSidebarAddModel as EventListener);
+    window.addEventListener('sidebar-add-triposr', handleSidebarAddTripoSR as EventListener);
     
     // Set up execution engine callbacks for UI behaviors
     // This keeps UI logic (timeouts, node selection) in the UI layer
@@ -201,6 +202,7 @@
     window.removeEventListener('keyup', handleKeyUp);
     window.removeEventListener('sidebar-add-image', handleSidebarAddImage as EventListener);
     window.removeEventListener('sidebar-add-model', handleSidebarAddModel as EventListener);
+    window.removeEventListener('sidebar-add-triposr', handleSidebarAddTripoSR as EventListener);
   });
   
   async function initRenderer() {
@@ -1144,7 +1146,12 @@
     if (sidebarModelData) {
       try {
         const { path, name, type, size, metadata } = JSON.parse(sidebarModelData);
-        addModelNode(path, name, type, size, dropWorld.x, dropWorld.y, metadata);
+        // Handle different model types
+        if (type === 'triposr') {
+          addTripoSRNode(dropWorld.x, dropWorld.y);
+        } else {
+          addModelNode(path, name, type, size, dropWorld.x, dropWorld.y, metadata);
+        }
       } catch (error) {
         console.error('Error processing sidebar model drop:', error);
       }
@@ -1239,6 +1246,35 @@
     graphStore.selectNode(newId, false);
   }
   
+  // Helper function to add a TripoSR node
+  function addTripoSRNode(worldX: number, worldY: number) {
+    const nodeWidth = NODE_SIZE;
+    const nodeHeight = NODE_SIZE;
+    
+    const x = worldX - nodeWidth / 2;
+    const y = worldY - nodeHeight / 2;
+    
+    const newId = graphStore.addNode(
+      'triposr',
+      x,
+      y,
+      {},
+      nodeWidth,
+      nodeHeight
+    );
+    
+    // Track for fade-in animation
+    newlyAddedNodeIds = new Set(newlyAddedNodeIds).add(newId);
+    
+    setTimeout(() => {
+      const updated = new Set(newlyAddedNodeIds);
+      updated.delete(newId);
+      newlyAddedNodeIds = updated;
+    }, 100);
+    
+    graphStore.selectNode(newId, false);
+  }
+  
   // Calculate the center of the visible canvas in world coordinates
   // Accounts for the left sidebar width when open
   function getVisibleCenterWorld(): { x: number; y: number } {
@@ -1292,6 +1328,20 @@
     
     // Add the model node with metadata
     addModelNode(path, name, type, size, worldX, worldY, metadata);
+  }
+  
+  // Handle sidebar click-to-add TripoSR event
+  function handleSidebarAddTripoSR(e: CustomEvent) {
+    // Calculate position at center of visible canvas with offset
+    const center = getVisibleCenterWorld();
+    const worldX = center.x + clickAddOffset - NODE_SIZE / 2;
+    const worldY = center.y + clickAddOffset - NODE_SIZE / 2;
+    
+    // Increment offset for next item
+    clickAddOffset += CLICK_ADD_OFFSET_INCREMENT;
+    
+    // Add the TripoSR node
+    addTripoSRNode(worldX, worldY);
   }
   
   // Helper function to add an image node from a path
@@ -1500,6 +1550,27 @@
     error: string | null;
   }>>([]);
   
+  // Mesh output nodes rendered as DOM overlays (show generated 3D meshes)
+  let meshOutputNodes = $state<Array<{
+    id: string;
+    meshUrl: string;
+    previewUrl: string;
+    outputPath: string;
+    filename: string;
+    screenX: number;
+    screenY: number;
+    screenWidth: number;
+    screenHeight: number;
+    borderRadius: number;
+    isNew: boolean;
+    isSelected: boolean;
+    isHovered: boolean;
+    status: string;
+    error: string | null;
+    vertices: number;
+    faces: number;
+  }>>([]);
+  
   // Port overlays computed separately to avoid performance issues
   // Only show ports for hovered/selected nodes or when connecting
   
@@ -1517,6 +1588,7 @@
       imageNodes = [];
       modelNodes = [];
       outputNodes = [];
+      meshOutputNodes = [];
       return;
     }
     
@@ -1610,6 +1682,42 @@
           isHovered: hoveredNodeId === node.id,
           status: node.status || 'idle',
           error: node.error || null,
+        };
+      });
+    
+    // Mesh output nodes (TripoSR generated 3D meshes)
+    meshOutputNodes = allNodes
+      .filter(node => node.type === 'mesh-output' || node.type === 'triposr')
+      .map(node => {
+        const topLeft = renderer.worldToScreen(node.x, node.y, cam);
+        const bottomRight = renderer.worldToScreen(
+          node.x + node.width, 
+          node.y + node.height, 
+          cam
+        );
+        
+        // Extract filename from outputPath
+        const outputPath = node.params.outputPath as string;
+        const filename = outputPath ? outputPath.split('/').pop() || '3D Output' : '3D Output';
+        
+        return {
+          id: node.id,
+          meshUrl: (node.params.meshUrl) as string || '',
+          previewUrl: (node.thumbnailUrl || node.params.previewUrl) as string || '',
+          outputPath,
+          filename,
+          screenX: topLeft.x,
+          screenY: topLeft.y,
+          screenWidth: bottomRight.x - topLeft.x,
+          screenHeight: bottomRight.y - topLeft.y,
+          borderRadius: 12 * cam.zoom,
+          isNew: newlyAddedNodeIds.has(node.id),
+          isSelected: graphStore.selectedNodeIds.has(node.id),
+          isHovered: hoveredNodeId === node.id,
+          status: node.status || 'idle',
+          error: node.error || null,
+          vertices: (node.params.vertices as number) || 0,
+          faces: (node.params.faces as number) || 0,
         };
       });
   });
@@ -2027,6 +2135,82 @@
     </div>
   {/each}
 
+  <!-- Mesh output nodes rendered as DOM overlays (show generated 3D meshes) -->
+  {#each meshOutputNodes as meshNode (meshNode.id)}
+    <div
+      class="image-node-wrapper"
+      class:selected={meshNode.isSelected}
+      class:hovered={meshNode.isHovered}
+      style={`left: ${meshNode.screenX}px; top: ${meshNode.screenY}px;`}
+    >
+      <div
+        class="mesh-node-overlay"
+        class:fade-in={meshNode.isNew}
+        class:empty={!meshNode.meshUrl && !meshNode.previewUrl}
+        class:selected={meshNode.isSelected}
+        class:error={meshNode.status === 'error'}
+        style={`width: ${meshNode.screenWidth}px; height: ${meshNode.screenHeight}px; border-radius: ${meshNode.borderRadius}px;`}
+      >
+        {#if meshNode.previewUrl}
+          <img 
+            src={meshNode.previewUrl} 
+            alt="3D mesh preview"
+            draggable="false"
+          />
+          <!-- 3D badge -->
+          <div class="mesh-badge">3D</div>
+          <!-- Hover overlay -->
+          {#if meshNode.isHovered && !meshNode.isSelected}
+            <div class="image-hover-overlay"></div>
+          {/if}
+          <!-- Connector icon for mesh output -->
+          <div 
+            class="node-connector-icon" 
+            class:visible={meshNode.isHovered}
+            class:dragging={isConnecting && connectionStart?.nodeId === meshNode.id}
+            onpointerdown={(e) => handleConnectorMouseDown(e, meshNode.id, 'mesh')}
+            onmouseenter={() => handleConnectorMouseEnter(meshNode.id)}
+            onmouseleave={handleConnectorMouseLeave}
+            role="button"
+            tabindex="-1"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 8v8M8 12h8" />
+            </svg>
+          </div>
+        {:else}
+          <div class="mesh-placeholder">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M12 2L2 7l10 5 10-5-10-5z" />
+              <path d="M2 17l10 5 10-5" />
+              <path d="M2 12l10 5 10-5" />
+            </svg>
+            <span>3D Mesh</span>
+          </div>
+        {/if}
+        {#if meshNode.status === 'running'}
+          <div class="mesh-loading-overlay">
+            <div class="mesh-spinner"></div>
+            <span>Generating mesh...</span>
+          </div>
+        {/if}
+        {#if meshNode.status === 'error'}
+          <div class="node-error-badge" title={meshNode.error || 'Error'}>!</div>
+        {/if}
+      </div>
+      <!-- Error tooltip for mesh node -->
+      {#if meshNode.status === 'error' && meshNode.error && meshNode.isHovered}
+        <div class="node-error-tooltip" style={`max-width: ${Math.max(meshNode.screenWidth, 200)}px;`}>
+          <span class="error-icon">⚠️</span>
+          <span class="error-text">{meshNode.error}</span>
+        </div>
+      {/if}
+      <!-- Filename label - always present, fades in on hover -->
+      <div class="node-filename" class:visible={meshNode.isHovered} style={`max-width: ${meshNode.screenWidth}px;`}>{meshNode.filename}</div>
+    </div>
+  {/each}
+
   <!-- Port overlays for connection handles -->
   {#each portOverlays as port (`${port.nodeId}-${port.portId}-${port.isOutput}`)}
     <div
@@ -2038,6 +2222,7 @@
       class:type-string={port.type === 'string'}
       class:type-tensor={port.type === 'tensor'}
       class:type-number={port.type === 'number'}
+      class:type-mesh={port.type === 'mesh'}
       style={`left: ${port.screenX}px; top: ${port.screenY}px;`}
     ></div>
   {/each}
@@ -2196,6 +2381,11 @@
   .port-overlay.type-number {
     background: rgba(59, 130, 246, 0.4);
     border-color: rgba(59, 130, 246, 0.7);
+  }
+  
+  .port-overlay.type-mesh {
+    background: rgba(77, 166, 255, 0.4);
+    border-color: rgba(77, 166, 255, 0.7);
   }
   
   .port-overlay.highlighted {
@@ -2694,6 +2884,110 @@
   }
   
   .output-node-overlay.fade-in {
+    animation: node-fade-in 80ms ease-out forwards;
+  }
+  
+  /* Mesh output node overlay (3D meshes) */
+  .mesh-node-overlay {
+    position: relative;
+    border-radius: 12px;
+    overflow: visible;
+    pointer-events: none;
+    background: linear-gradient(135deg, #1a2a3f 0%, #1a1a2f 100%);
+    user-select: none;
+    -webkit-user-select: none;
+    transition: border 0.15s ease;
+    border: 0.509px solid transparent;
+  }
+  
+  .mesh-node-overlay.selected {
+    border: 1px solid #4da6ff;
+  }
+  
+  .mesh-node-overlay.error {
+    border: 2px solid #ef4444;
+    box-shadow: 0 0 12px rgba(239, 68, 68, 0.3);
+  }
+  
+  .mesh-node-overlay img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-user-drag: none;
+    border-radius: inherit;
+  }
+  
+  .mesh-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    padding: 2px 6px;
+    background: rgba(77, 166, 255, 0.9);
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    pointer-events: none;
+  }
+  
+  .mesh-placeholder {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    color: rgba(77, 166, 255, 0.7);
+  }
+  
+  .mesh-placeholder svg {
+    width: 48px;
+    height: 48px;
+    opacity: 0.5;
+  }
+  
+  .mesh-placeholder span {
+    font-size: 12px;
+    font-weight: 500;
+    opacity: 0.7;
+  }
+  
+  .mesh-loading-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    background: rgba(26, 42, 63, 0.95);
+    color: rgba(77, 166, 255, 0.9);
+    font-size: 11px;
+    border-radius: inherit;
+  }
+  
+  .mesh-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid rgba(77, 166, 255, 0.2);
+    border-top-color: #4da6ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  
+  @keyframes spin {
+    to {
+      transform: rotate(360deg);
+    }
+  }
+  
+  .mesh-node-overlay.fade-in {
     animation: node-fade-in 80ms ease-out forwards;
   }
   

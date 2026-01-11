@@ -28,6 +28,13 @@ export interface Img2ImgRequest {
   modelPath?: string;
 }
 
+export interface TripoSRRequest {
+  inputImage: string; // URL or base64 of input image
+  foregroundRatio: number; // 0.0 - 1.0, controls background removal crop
+  mcResolution: number; // Marching cubes resolution (128, 256, 512)
+  removeBackground: boolean; // Whether to auto-remove background
+}
+
 export interface InferenceResult {
   imageData: ImageData | null;
   imageUrl: string | null;
@@ -35,6 +42,15 @@ export interface InferenceResult {
   outputPath?: string; // File path where image was saved
   width?: number; // Generated image width
   height?: number; // Generated image height
+}
+
+export interface TripoSRResult {
+  meshPath: string; // URL to the GLB file
+  previewUrl: string | null; // URL to preview image
+  outputPath: string; // Full file path
+  timeTaken: number;
+  vertices: number;
+  faces: number;
 }
 
 export interface InferenceProgress {

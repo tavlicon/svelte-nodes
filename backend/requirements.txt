@@ -11,5 +11,14 @@ accelerate>=0.25.0
 safetensors>=0.4.0
 numpy>=1.24.0
 sse-starlette==1.8.2
-aiofiles==23.2.1
+aiofiles>=22.1.0,<23
 certifi>=2023.0.0
+
+# TripoSR dependencies for 3D mesh generation
+omegaconf>=2.3.0
+einops>=0.7.0
+rembg>=2.0.50
+trimesh[easy]>=4.0.0
+pygltflib>=1.16.0
+huggingface-hub>=0.20.0
+scikit-image>=0.22.0

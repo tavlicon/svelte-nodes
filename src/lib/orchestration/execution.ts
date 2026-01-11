@@ -10,7 +10,7 @@
 import type { NodeInstance, Edge } from '../graph/types';
 import { graphStore } from '../graph/store.svelte';
 import { nodeRegistry } from '../graph/nodes/registry';
-import { inferenceManager, type Img2ImgRequest } from '../inference/manager';
+import { inferenceManager, type Img2ImgRequest, type TripoSRRequest } from '../inference/manager';
 
 export type ExecutionStatus = 'idle' | 'pending' | 'running' | 'complete' | 'error';
 
@@ -207,6 +207,10 @@ class ExecutionEngine {
           outputs = await this.executeImg2Img(node, inputs);
           break;
           
+        case 'triposr':
+          outputs = await this.executeTripoSR(node, inputs);
+          break;
+          
         case 'image':
           // Image node outputs its image URL
           outputs = { image: node.params.imageUrl || '' };
@@ -234,6 +238,24 @@ class ExecutionEngine {
           outputs = { image: outputImageUrl };
           break;
           
+        case 'mesh-output':
+          // Mesh output node receives and displays the 3D mesh
+          const meshUrl = (inputs.mesh as string) || (node.params.meshUrl as string) || '';
+          const previewUrl = (node.params.previewUrl as string) || '';
+          if (inputs.mesh) {
+            const thumbnailForMesh = previewUrl || (inputs.mesh as string);
+            graphStore.updateNode(nodeId, {
+              thumbnailUrl: thumbnailForMesh,
+              params: {
+                ...node.params,
+                meshUrl: inputs.mesh as string,
+              },
+            });
+          }
+          // Output the mesh so it can chain to another node
+          outputs = { mesh: meshUrl };
+          break;
+          
         default:
           console.warn(`Unknown node type: ${node.type}`);
       }
@@ -252,7 +274,7 @@ class ExecutionEngine {
       
       // For model nodes: notify UI layer via callback so it can handle post-completion behavior
       // (UI logic like timeouts, node selection, etc. should be handled by the callback handler)
-      if (node.type === 'model' && outputs._outputNodeId) {
+      if ((node.type === 'model' || node.type === 'triposr') && outputs._outputNodeId) {
         const outputNodeId = outputs._outputNodeId as string;
         this.callbacks.onModelJobComplete?.(nodeId, outputNodeId);
       }
@@ -403,6 +425,120 @@ class ExecutionEngine {
     return { image: result.imageUrl || result.imageData, _outputNodeId: outputNodeId };
   }
   
+  /**
+   * Execute TripoSR 3D mesh generation
+   */
+  private async executeTripoSR(
+    node: NodeInstance,
+    inputs: Record<string, unknown>
+  ): Promise<Record<string, unknown>> {
+    // Get input image (from connected image node)
+    let inputImage = inputs.image as string | undefined;
+    
+    // Fallback: if no direct connection, look for an Image node in the graph
+    if (!inputImage || inputImage.trim() === '') {
+      const imageNodes = Array.from(graphStore.nodes.values())
+        .filter(n => n.type === 'image' && n.params.imageUrl);
+      
+      if (imageNodes.length > 0) {
+        // Use the first image node with a configured imageUrl
+        inputImage = imageNodes[0].params.imageUrl as string;
+        console.log('TripoSR: Using fallback image from Image node:', inputImage);
+      }
+    }
+    
+    if (!inputImage || inputImage.trim() === '') {
+      throw new Error('No input image connected. Connect an Image node to the TripoSR image input port.');
+    }
+    
+    // Validate input image URL/data
+    if (!inputImage.startsWith('data:') && !inputImage.startsWith('http') && !inputImage.startsWith('/')) {
+      throw new Error(`Invalid image input: "${inputImage.substring(0, 50)}...". Expected a URL or base64 data.`);
+    }
+    
+    // Build TripoSR request
+    const request: TripoSRRequest = {
+      inputImage,
+      foregroundRatio: (node.params.foreground_ratio as number) ?? 0.85,
+      mcResolution: (node.params.mc_resolution as number) ?? 256,
+      removeBackground: (node.params.remove_background as boolean) ?? true,
+    };
+    
+    // Run TripoSR inference
+    const result = await inferenceManager.runTripoSR(request, (progress) => {
+      console.log(`TripoSR progress: ${progress.status} (${progress.step}/${progress.totalSteps})`);
+    });
+    
+    // Update thumbnail with preview
+    if (result.previewUrl) {
+      graphStore.updateNode(node.id, { thumbnailUrl: result.previewUrl });
+    }
+    
+    // Create mesh output node
+    const outputNodeId = this.createOrUpdateMeshOutputNode(node, result);
+    
+    return { mesh: result.meshPath, _outputNodeId: outputNodeId };
+  }
+  
+  /**
+   * Create a new mesh output node for TripoSR generations
+   */
+  private createOrUpdateMeshOutputNode(
+    modelNode: NodeInstance,
+    result: { meshPath: string; previewUrl: string | null; outputPath: string; timeTaken: number; vertices: number; faces: number }
+  ): string {
+    // Extract generation parameters from model node
+    const generationParams = {
+      foregroundRatio: modelNode.params.foreground_ratio as number || 0.85,
+      mcResolution: modelNode.params.mc_resolution as number || 256,
+      removeBackground: modelNode.params.remove_background as boolean || true,
+      modelName: modelNode.params.modelName as string || 'TripoSR Base',
+    };
+    
+    // Calculate output node position
+    const modelNodeWidth = modelNode.width || 200;
+    const modelNodeHeight = modelNode.height || 200;
+    const BASE_OUTPUT_SIZE = 200;
+    
+    // Position output to the RIGHT of the model node
+    const outputX = modelNode.x + modelNodeWidth + 40;
+    const modelCenterY = modelNode.y + (modelNodeHeight / 2);
+    
+    // Find existing mesh-output nodes to the right of the model
+    const outputNodes = Array.from(graphStore.nodes.values())
+      .filter(node => node.type === 'mesh-output')
+      .filter(node => node.x >= modelNode.x + modelNodeWidth)
+      .sort((a, b) => (a.y + (a.height || 200)) - (b.y + (b.height || 200)));
+    
+    // Calculate Y position
+    let outputY: number;
+    if (outputNodes.length === 0) {
+      outputY = modelCenterY - (BASE_OUTPUT_SIZE / 2);
+    } else {
+      const lowestOutput = outputNodes[outputNodes.length - 1];
+      const lowestOutputHeight = lowestOutput.height || 200;
+      outputY = lowestOutput.y + lowestOutputHeight + 20;
+    }
+    
+    // Create mesh output node
+    const outputNodeId = graphStore.addNode('mesh-output', outputX, outputY, {
+      meshUrl: result.meshPath,
+      previewUrl: result.previewUrl || '',
+      outputPath: result.outputPath,
+      timeTaken: Math.round(result.timeTaken),
+      vertices: result.vertices,
+      faces: result.faces,
+      generationParams,
+    }, BASE_OUTPUT_SIZE, BASE_OUTPUT_SIZE);
+    
+    // Set thumbnail
+    graphStore.updateNode(outputNodeId, {
+      thumbnailUrl: result.previewUrl || '',
+    });
+    
+    return outputNodeId;
+  }
+
   /**
    * Create a new output node for each generation (no wire connection)
    * Stacks outputs vertically below previous ones
