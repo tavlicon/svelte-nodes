@@ -11,7 +11,7 @@
     "moduleDetection": "force",
     "strict": true,
     "noEmit": true,
-    "types": ["@webgpu/types", "vite/client"],
+    "types": ["@webgpu/types", "vite/client", "vitest/globals"],
     "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
   "include": ["src/**/*.ts", "src/**/*.svelte", "src/**/*.d.ts"]
