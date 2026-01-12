@@ -939,7 +939,9 @@
   .panel-content {
     flex: 1;
     overflow-y: auto;
+    min-height: 0; /* Critical: allows flex child to shrink and become the scroll container */
     padding: 0 8px 24px 8px;
+    margin-right: 2px; /* Nudge scrollbar 2px left */
     
     /* Custom scrollbar */
     scrollbar-width: thin;

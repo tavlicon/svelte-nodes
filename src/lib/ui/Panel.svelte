@@ -146,5 +146,27 @@
     display: flex;
     flex-direction: column;
     min-height: 0; /* Important: allows flex child to shrink below content size */
+    
+    /* Custom scrollbar - matches left sidebar styling */
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+  }
+  
+  .panel-body::-webkit-scrollbar {
+    width: 6px;
+  }
+  
+  .panel-body::-webkit-scrollbar-track {
+    background: transparent;
+    margin: 4px 0;
+  }
+  
+  .panel-body::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 3px;
+  }
+  
+  .panel-body::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.25);
   }
 </style>

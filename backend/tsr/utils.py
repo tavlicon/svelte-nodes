@@ -474,9 +474,9 @@ def save_video(
             pixelformat='yuv420p',
             macro_block_size=8,
         )
-        for frame in frames:
-            writer.append_data(frame)
-        writer.close()
+    for frame in frames:
+        writer.append_data(frame)
+    writer.close()
     except Exception as e:
         # Fallback to pyav if FFMPEG unavailable
         try:
