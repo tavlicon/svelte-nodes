@@ -761,34 +761,37 @@ class TripoSRRequest(BaseModel):
     foreground_ratio: float = 0.85
     mc_resolution: int = 256
     chunk_size: int = 8192
+    bake_texture: bool = False
+    texture_resolution: int = 2048
 
 
-def load_triposr_model():
-    """Load TripoSR model from local directory"""
+def load_triposr_model(chunk_size: int = 8192):
+    """Load TripoSR model from local directory using TSR system"""
     global triposr_model, triposr_loaded, current_device
     
     if triposr_loaded and triposr_model is not None:
+        # Update chunk size if model already loaded
+        triposr_model.renderer.set_chunk_size(chunk_size)
         return True
     
     model_dir = Path(__file__).parent.parent / "data" / "models"
     triposr_path = model_dir / "triposr-base"
-    dino_path = model_dir / "dino-vitb16"
     
     if not triposr_path.exists():
         logger.error(f"❌ TripoSR model not found at {triposr_path}")
         return False
     
-    if not dino_path.exists():
-        logger.error(f"❌ DINO encoder not found at {dino_path}")
-        return False
-    
     logger.info("=" * 60)
-    logger.info("🔺 Loading TripoSR model...")
+    logger.info("🔺 Loading TripoSR model using TSR system...")
     
     try:
-        # Import TripoSR components
-        from omegaconf import OmegaConf
-        from transformers import ViTImageProcessor, ViTModel
+        # Import TSR from local tsr module
+        import sys
+        backend_dir = Path(__file__).parent
+        if str(backend_dir) not in sys.path:
+            sys.path.insert(0, str(backend_dir))
+        
+        from tsr.system import TSR
         
         # Determine device
         device, torch_dtype = get_device_and_dtype()
@@ -798,34 +801,24 @@ def load_triposr_model():
         
         logger.info(f"  Device: {device}, dtype: {torch_dtype}")
         
-        # Load config
-        config_path = triposr_path / "config.yaml"
-        config = OmegaConf.load(config_path)
-        logger.info(f"  Loaded config from {config_path}")
+        # Load full TSR model using from_pretrained
+        logger.info(f"  Loading TSR model from {triposr_path}...")
+        model = TSR.from_pretrained(
+            str(triposr_path),
+            config_name="config.yaml",
+            weight_name="model.ckpt",
+        )
         
-        # Load DINO image processor and model
-        logger.info(f"  Loading DINO encoder from {dino_path}...")
-        dino_processor = ViTImageProcessor.from_pretrained(str(dino_path), local_files_only=True)
-        dino_model = ViTModel.from_pretrained(str(dino_path), local_files_only=True)
-        dino_model = dino_model.to(device)
-        dino_model.eval()
+        # Configure renderer chunk size
+        model.renderer.set_chunk_size(chunk_size)
         
-        # Load TripoSR checkpoint
-        logger.info(f"  Loading TripoSR checkpoint...")
-        ckpt_path = triposr_path / "model.ckpt"
-        checkpoint = torch.load(ckpt_path, map_location=device, weights_only=False)
+        # Move to device
+        model.to(device)
         
-        # Store model components
-        triposr_model = {
-            "config": config,
-            "dino_processor": dino_processor,
-            "dino_model": dino_model,
-            "checkpoint": checkpoint,
-            "device": device,
-            "dtype": torch_dtype,
-        }
-        
+        triposr_model = model
         triposr_loaded = True
+        current_device = device
+        
         logger.info("✅ TripoSR model loaded successfully!")
         logger.info("=" * 60)
         return True
@@ -837,44 +830,42 @@ def load_triposr_model():
         return False
 
 
-def remove_background(image: Image.Image, foreground_ratio: float = 0.85) -> Image.Image:
-    """Remove background from image using rembg"""
+def remove_background_tsr(image: Image.Image, foreground_ratio: float = 0.85) -> Image.Image:
+    """
+    Remove background from image using rembg and resize foreground.
+    Uses the same approach as the reference TripoSR run.py
+    """
     try:
-        from rembg import remove
+        import rembg
         
-        # Remove background
-        image_rgba = remove(image)
+        # Import utilities from local tsr module
+        import sys
+        backend_dir = Path(__file__).parent
+        if str(backend_dir) not in sys.path:
+            sys.path.insert(0, str(backend_dir))
         
-        # Create white background
-        background = Image.new("RGBA", image_rgba.size, (255, 255, 255, 255))
+        from tsr.utils import remove_background, resize_foreground
         
-        # Composite
-        result = Image.alpha_composite(background, image_rgba)
+        # Create rembg session
+        rembg_session = rembg.new_session()
         
-        # Crop to foreground
-        bbox = image_rgba.getbbox()
-        if bbox:
-            # Add padding
-            w, h = image_rgba.size
-            cx, cy = (bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2
-            max_dim = max(bbox[2] - bbox[0], bbox[3] - bbox[1])
-            
-            # Calculate crop with foreground ratio
-            crop_size = max_dim / foreground_ratio
-            half_size = crop_size / 2
-            
-            left = max(0, int(cx - half_size))
-            top = max(0, int(cy - half_size))
-            right = min(w, int(cx + half_size))
-            bottom = min(h, int(cy + half_size))
-            
-            result = result.crop((left, top, right, bottom))
+        # Remove background using tsr utility
+        image_rgba = remove_background(image, rembg_session)
         
-        return result.convert("RGB")
+        # Resize foreground using tsr utility
+        image_processed = resize_foreground(image_rgba, foreground_ratio)
         
-    except ImportError:
-        logger.warning("rembg not installed, skipping background removal")
-        return image
+        # Convert to RGB with gray background (as expected by TripoSR)
+        image_np = np.array(image_processed).astype(np.float32) / 255.0
+        image_rgb = image_np[:, :, :3] * image_np[:, :, 3:4] + (1 - image_np[:, :, 3:4]) * 0.5
+        image_final = Image.fromarray((image_rgb * 255.0).astype(np.uint8))
+        
+        return image_final
+        
+    except ImportError as e:
+        logger.warning(f"rembg not installed or tsr utils not available: {e}")
+        # Fallback: simple resize
+        return process_triposr_image(image)
 
 
 def process_triposr_image(image: Image.Image, target_size: int = 512) -> Image.Image:
@@ -893,50 +884,30 @@ def process_triposr_image(image: Image.Image, target_size: int = 512) -> Image.I
     return image
 
 
-def extract_mesh_marching_cubes(
-    scene_features: torch.Tensor,
-    checkpoint: dict,
-    device: str,
-    resolution: int = 256,
-    chunk_size: int = 8192
-) -> "trimesh.Trimesh":
-    """
-    Extract 3D mesh using marching cubes algorithm.
-    This is a simplified implementation - full TripoSR uses more sophisticated extraction.
-    """
-    import trimesh
-    from skimage import measure
-    
-    logger.info(f"  Extracting mesh at resolution {resolution}...")
-    
-    # Create a simple unit sphere mesh as placeholder for actual TripoSR mesh extraction
-    # In production, this would use the NeRF decoder and marching cubes
-    
-    # For now, create a simple mesh from the features
-    # This placeholder will be replaced with actual TripoSR mesh extraction
-    
-    # Generate a basic mesh (sphere for testing)
-    mesh = trimesh.creation.icosphere(subdivisions=3, radius=0.5)
-    
-    return mesh
-
-
 @app.get("/api/triposr/info")
 async def get_triposr_info():
     """Get TripoSR model status"""
+    device = "none"
+    if triposr_model is not None:
+        try:
+            # Get device from model parameters
+            device = str(next(triposr_model.parameters()).device)
+        except:
+            device = current_device
     return {
         "loaded": triposr_loaded,
-        "device": triposr_model["device"] if triposr_model else "none",
+        "device": device,
         "model_name": "TripoSR Base",
     }
 
 
 @app.post("/api/triposr/load")
-async def load_triposr_endpoint():
+async def load_triposr_endpoint(chunk_size: int = 8192):
     """Explicitly load TripoSR model"""
-    success = load_triposr_model()
+    success = load_triposr_model(chunk_size)
     if success:
-        return {"status": "success", "device": triposr_model["device"]}
+        device = str(next(triposr_model.parameters()).device)
+        return {"status": "success", "device": device}
     else:
         raise HTTPException(status_code=500, detail="Failed to load TripoSR model")
 
@@ -947,23 +918,50 @@ async def generate_3d_mesh(
     foreground_ratio: float = Form(0.85),
     mc_resolution: int = Form(256),
     remove_bg: bool = Form(True),
+    chunk_size: int = Form(8192),
+    bake_texture: bool = Form(False),
+    texture_resolution: int = Form(2048),
+    render_video: bool = Form(False),
+    render_n_views: int = Form(30),
+    render_resolution: int = Form(256),
 ):
     """
     Generate 3D mesh from single image using TripoSR.
-    Returns path to generated GLB file.
+    Returns path to generated GLB file and optional turntable video.
+    
+    Parameters:
+    - foreground_ratio: Ratio of foreground to image (0.5-1.0)
+    - mc_resolution: Marching cubes grid resolution (64-512)
+    - remove_bg: Whether to auto-remove background
+    - chunk_size: Evaluation chunk size for rendering (1024-16384)
+    - bake_texture: Whether to bake UV texture instead of vertex colors
+    - texture_resolution: Texture atlas size if baking (512-4096)
+    - render_video: Whether to generate turntable MP4 video preview
+    - render_n_views: Number of frames for video (30 = 1 second at 30fps)
+    - render_resolution: Resolution for video frames (128-512)
     """
     logger.info("=" * 50)
     logger.info("📥 Received TripoSR request")
     logger.info(f"  Foreground ratio: {foreground_ratio}")
     logger.info(f"  MC Resolution: {mc_resolution}")
     logger.info(f"  Remove background: {remove_bg}")
+    logger.info(f"  Chunk size: {chunk_size}")
+    logger.info(f"  Bake texture: {bake_texture}")
+    if bake_texture:
+        logger.info(f"  Texture resolution: {texture_resolution}")
+    logger.info(f"  Render video: {render_video}")
+    if render_video:
+        logger.info(f"  Video frames: {render_n_views}, resolution: {render_resolution}px")
     
     # Load model if not loaded
     if not triposr_loaded:
         logger.info("  Loading TripoSR model (first request)...")
-        success = load_triposr_model()
+        success = load_triposr_model(chunk_size)
         if not success:
             raise HTTPException(status_code=503, detail="TripoSR model not available")
+    else:
+        # Update chunk size
+        triposr_model.renderer.set_chunk_size(chunk_size)
     
     try:
         import trimesh
@@ -977,59 +975,113 @@ async def generate_3d_mesh(
         # Remove background if requested
         if remove_bg:
             logger.info("  Removing background...")
-            input_image = remove_background(input_image, foreground_ratio)
+            input_image = remove_background_tsr(input_image, foreground_ratio)
             logger.info(f"  After background removal: {input_image.width}x{input_image.height}")
+        else:
+            # Just resize to proper size
+            input_image = process_triposr_image(input_image, 512)
         
-        # Process to 512x512
-        input_image = process_triposr_image(input_image, 512)
-        logger.info(f"  Processed size: {input_image.width}x{input_image.height}")
+        logger.info(f"  Final input size: {input_image.width}x{input_image.height}")
         
         start_time = time.time()
         
-        # Get DINO features
-        logger.info("🧠 Extracting DINO features...")
-        device = triposr_model["device"]
-        dino_processor = triposr_model["dino_processor"]
-        dino_model = triposr_model["dino_model"]
+        # Get device
+        device = str(next(triposr_model.parameters()).device)
         
-        # Process image through DINO
-        inputs = dino_processor(images=input_image, return_tensors="pt")
-        inputs = {k: v.to(device) for k, v in inputs.items()}
-        
+        # Run TSR model forward pass to get scene codes
+        logger.info("🧠 Running TSR inference...")
         with torch.no_grad():
-            outputs = dino_model(**inputs)
-            image_features = outputs.last_hidden_state
+            scene_codes = triposr_model([input_image], device=device)
         
-        logger.info(f"  Features shape: {image_features.shape}")
+        logger.info(f"  Scene codes shape: {scene_codes.shape}")
         
         # Extract mesh using marching cubes
-        logger.info("🔺 Generating 3D mesh...")
-        mesh = extract_mesh_marching_cubes(
-            image_features,
-            triposr_model["checkpoint"],
-            device,
-            resolution=mc_resolution,
-        )
+        logger.info(f"🔺 Extracting mesh at resolution {mc_resolution}...")
+        with torch.no_grad():
+            meshes = triposr_model.extract_mesh(
+                scene_codes,
+                has_vertex_color=(not bake_texture),
+                resolution=mc_resolution,
+            )
         
-        elapsed_time = time.time() - start_time
-        logger.info(f"✅ Mesh generation complete in {elapsed_time:.2f}s")
+        mesh = meshes[0]
+        
+        # Handle texture baking if requested
+        if bake_texture:
+            logger.info(f"🎨 Baking texture at resolution {texture_resolution}...")
+            try:
+                import xatlas
+                from tsr.bake_texture import bake_texture as bake_texture_fn
+                
+                bake_output = bake_texture_fn(mesh, triposr_model, scene_codes[0], texture_resolution)
+                
+                # Update mesh with UV mapping
+                mesh = trimesh.Trimesh(
+                    vertices=mesh.vertices[bake_output["vmapping"]],
+                    faces=bake_output["indices"],
+                    visual=trimesh.visual.TextureVisuals(
+                        uv=bake_output["uvs"],
+                    ),
+                )
+                logger.info("  Texture baked successfully")
+            except Exception as e:
+                logger.warning(f"  Texture baking failed, using vertex colors: {e}")
+        
+        mesh_time = time.time() - start_time
+        logger.info(f"✅ Mesh generation complete in {mesh_time:.2f}s")
         logger.info(f"  Vertices: {len(mesh.vertices)}, Faces: {len(mesh.faces)}")
         
         # Save mesh as GLB
         output_dir = Path(__file__).parent.parent / "data" / "output"
         output_dir.mkdir(parents=True, exist_ok=True)
-        output_filename = f"mesh_{int(time.time())}_{uuid.uuid4().hex[:8]}.glb"
+        timestamp = int(time.time())
+        unique_id = uuid.uuid4().hex[:8]
+        output_filename = f"mesh_{timestamp}_{unique_id}.glb"
         output_path = output_dir / output_filename
         
         # Export to GLB
         mesh.export(str(output_path), file_type="glb")
         logger.info(f"💾 Saved to: {output_path}")
         
-        # Also save a rendered preview image
+        # Generate turntable video if requested
+        video_url = None
+        video_time = 0.0
+        if render_video:
+            logger.info(f"🎬 Rendering turntable video ({render_n_views} frames at {render_resolution}px)...")
+            video_start = time.time()
+            try:
+                from tsr.utils import save_video
+                
+                # Render frames using NeRF
+                with torch.no_grad():
+                    render_images = triposr_model.render(
+                        scene_codes,
+                        n_views=render_n_views,
+                        height=render_resolution,
+                        width=render_resolution,
+                        return_type="pil"
+                    )
+                
+                # Save as MP4
+                video_filename = f"render_{timestamp}_{unique_id}.mp4"
+                video_path = output_dir / video_filename
+                # Use 12fps for slower, smoother turntable animation
+                save_video(render_images[0], str(video_path), fps=12)
+                
+                video_time = time.time() - video_start
+                video_url = f"/data/output/{video_filename}"
+                logger.info(f"  Video saved to: {video_path} ({video_time:.2f}s)")
+            except Exception as e:
+                logger.warning(f"  Video rendering failed: {e}")
+                import traceback
+                traceback.print_exc()
+        
+        # Also save a rendered preview image (fallback for no-video case)
         preview_filename = output_filename.replace(".glb", "_preview.png")
         preview_path = output_dir / preview_filename
         
         # Create a simple preview by rendering the mesh
+        preview_url = None
         try:
             scene = mesh.scene()
             # Get PNG data from scene
@@ -1040,16 +1092,20 @@ async def generate_3d_mesh(
             preview_url = f"/data/output/{preview_filename}"
         except Exception as e:
             logger.warning(f"  Could not generate preview: {e}")
-            preview_url = None
         
+        total_time = time.time() - start_time
+        logger.info(f"⏱️ Total time: {total_time:.2f}s (mesh: {mesh_time:.2f}s, video: {video_time:.2f}s)")
         logger.info("=" * 50)
         
         return {
             "status": "success",
             "mesh_path": f"/data/output/{output_filename}",
+            "video_url": video_url,
             "preview_url": preview_url,
             "output_path": str(output_path),
-            "time_taken": elapsed_time,
+            "time_taken": total_time,
+            "mesh_time": mesh_time,
+            "video_time": video_time if render_video else None,
             "vertices": len(mesh.vertices),
             "faces": len(mesh.faces),
         }

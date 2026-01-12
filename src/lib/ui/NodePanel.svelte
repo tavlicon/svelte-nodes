@@ -29,6 +29,18 @@
     return Object.values(nodeDef.parameterMeta).some(meta => meta.group === 'sampler');
   });
   
+  // Check if node has output params (e.g., texture baking options)
+  let hasOutputParams = $derived.by(() => {
+    if (!nodeDef?.parameterMeta) return false;
+    return Object.values(nodeDef.parameterMeta).some(meta => meta.group === 'output');
+  });
+  
+  // Check if node has preview params (e.g., video rendering)
+  let hasPreviewParams = $derived.by(() => {
+    if (!nodeDef?.parameterMeta) return false;
+    return Object.values(nodeDef.parameterMeta).some(meta => meta.group === 'preview');
+  });
+  
   // Track if panel should be visible (node is selected)
   let isVisible = $derived(selectedNode !== null && nodeDef !== null);
   
@@ -75,7 +87,29 @@
         </section>
       {/if}
       
-      {#if !hasPrompts && !hasSamplerParams}
+      {#if hasOutputParams}
+        <section class="params-section">
+          <h3 class="section-title">Output Options</h3>
+          <ParameterEditor 
+            node={selectedNode} 
+            definition={nodeDef}
+            filterGroup="output"
+          />
+        </section>
+      {/if}
+      
+      {#if hasPreviewParams}
+        <section class="params-section">
+          <h3 class="section-title">Video Preview</h3>
+          <ParameterEditor 
+            node={selectedNode} 
+            definition={nodeDef}
+            filterGroup="preview"
+          />
+        </section>
+      {/if}
+      
+      {#if !hasPrompts && !hasSamplerParams && !hasOutputParams && !hasPreviewParams}
         <section class="params-section">
           <h3 class="section-title">Parameters</h3>
           <ParameterEditor 

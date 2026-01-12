@@ -407,14 +407,32 @@ export async function runTripoSRBackend(
     const imageBlob = await imageUrlToBlob(request.inputImage);
     console.log('  Blob size:', imageBlob.size, 'bytes');
     
-    // Create form data
+    // Create form data with all parameters
     const formData = new FormData();
     formData.append('image', imageBlob, 'input.png');
-    formData.append('foreground_ratio', String(request.foregroundRatio));
-    formData.append('mc_resolution', String(request.mcResolution));
-    formData.append('remove_bg', String(request.removeBackground));
+    formData.append('foreground_ratio', String(request.foregroundRatio ?? 0.85));
+    formData.append('mc_resolution', String(request.mcResolution ?? 256));
+    formData.append('remove_bg', String(request.removeBackground ?? true));
+    formData.append('chunk_size', String(request.chunkSize ?? 8192));
+    formData.append('bake_texture', String(request.bakeTexture ?? false));
+    formData.append('texture_resolution', String(request.textureResolution ?? 2048));
+    // Video rendering parameters
+    formData.append('render_video', String(request.renderVideo ?? false));
+    formData.append('render_n_views', String(request.renderNViews ?? 30));
+    formData.append('render_resolution', String(request.renderResolution ?? 256));
     
     console.log('📡 Sending request to TripoSR backend...');
+    console.log('  Parameters:', {
+      foregroundRatio: request.foregroundRatio ?? 0.85,
+      mcResolution: request.mcResolution ?? 256,
+      removeBackground: request.removeBackground ?? true,
+      chunkSize: request.chunkSize ?? 8192,
+      bakeTexture: request.bakeTexture ?? false,
+      textureResolution: request.textureResolution ?? 2048,
+      renderVideo: request.renderVideo ?? false,
+      renderNViews: request.renderNViews ?? 30,
+      renderResolution: request.renderResolution ?? 256,
+    });
     const response = await fetch(`${BACKEND_URL}/api/triposr`, {
       method: 'POST',
       body: formData,
@@ -443,6 +461,7 @@ export async function runTripoSRBackend(
     console.log('✅ TripoSR response received');
     console.log('  Time taken:', result.time_taken, 's');
     console.log('  Mesh path:', result.mesh_path);
+    console.log('  Video URL:', result.video_url);
     console.log('  Vertices:', result.vertices, 'Faces:', result.faces);
     
     // Send final progress
@@ -456,9 +475,12 @@ export async function runTripoSRBackend(
     
     return {
       meshPath: result.mesh_path,
+      videoUrl: result.video_url || null,
       previewUrl: result.preview_url,
       outputPath: result.output_path,
       timeTaken: result.time_taken * 1000, // Convert to ms
+      meshTime: (result.mesh_time || result.time_taken) * 1000,
+      videoTime: result.video_time ? result.video_time * 1000 : null,
       vertices: result.vertices,
       faces: result.faces,
     };

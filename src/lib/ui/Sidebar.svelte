@@ -6,10 +6,15 @@
   import { router, type Page } from '../router.svelte';
   import Panel from './Panel.svelte';
   import MeshViewer from './MeshViewer.svelte';
+  import { generateGLBThumbnail } from './glb-thumbnail';
   
   // State for 3D mesh preview modal
   let previewMeshUrl = $state<string | null>(null);
   let previewMeshName = $state<string>('');
+  
+  // State for video preview modal
+  let previewVideoUrl = $state<string | null>(null);
+  let previewVideoName = $state<string>('');
   
   function navigateTo(page: Page) {
     router.navigate(page);
@@ -52,6 +57,11 @@
 
   // Assets panel state - default to imported
   let assetsTab = $state<'generated' | 'imported'>('imported');
+  
+  // Tab switch handler
+  function switchAssetsTab(tab: 'generated' | 'imported') {
+    assetsTab = tab;
+  }
 
   // File lists
   let generatedFiles = $state<FileInfo[]>([]);
@@ -59,6 +69,77 @@
   let modelFiles = $state<FileInfo[]>([]);
   let canvasFiles = $state<FileInfo[]>([]);
   let isLoading = $state(false);
+  
+  // Cache for generated GLB thumbnails in sidebar
+  let sidebarThumbnailCache = $state<Map<string, string>>(new Map());
+  
+  // Generate thumbnails for GLB files without video previews
+  function generateSidebarThumbnail(glbPath: string) {
+    if (sidebarThumbnailCache.has(glbPath)) return;
+    
+    // Mark as loading
+    sidebarThumbnailCache = new Map(sidebarThumbnailCache).set(glbPath, 'loading');
+    
+    generateGLBThumbnail(glbPath, { width: 200, height: 200 })
+      .then(dataUrl => {
+        sidebarThumbnailCache = new Map(sidebarThumbnailCache).set(glbPath, dataUrl);
+      })
+      .catch(err => {
+        console.error('Failed to generate sidebar thumbnail:', err);
+        const newCache = new Map(sidebarThumbnailCache);
+        newCache.delete(glbPath);
+        sidebarThumbnailCache = newCache;
+      });
+  }
+  
+  // Trigger thumbnail generation reactively when Generated tab is shown
+  $effect(() => {
+    if (activePanel === 'assets' && assetsTab === 'generated') {
+      // Generate thumbnails for GLB files that don't have video previews
+      for (const file of displayedGeneratedFiles) {
+        if ((file.type === 'glb' || file.type === 'gltf') && !findMatchingVideo(file)) {
+          const thumbnailUrl = sidebarThumbnailCache.get(file.path);
+          if (!thumbnailUrl) {
+            generateSidebarThumbnail(file.path);
+          }
+        }
+      }
+    }
+  });
+  
+  // Helper to find matching video preview for a GLB file
+  // Files share timestamp_id pattern: mesh_1234_abc.glb <-> render_1234_abc.mp4
+  function findMatchingVideo(glbFile: FileInfo): FileInfo | null {
+    // Extract the timestamp_id from mesh filename: mesh_1234567_abcd1234.glb -> 1234567_abcd1234
+    const match = glbFile.name.match(/mesh_(\d+_[a-f0-9]+)\.glb$/i);
+    if (!match) return null;
+    
+    const timestampId = match[1];
+    const videoName = `render_${timestampId}.mp4`;
+    
+    return generatedFiles.find(f => f.name === videoName) || null;
+  }
+  
+  // Filter out video files that are previews for GLBs (they'll be shown as thumbnails)
+  let displayedGeneratedFiles = $derived.by(() => {
+    // Get all GLB timestamp_ids
+    const glbTimestampIds = new Set<string>();
+    for (const file of generatedFiles) {
+      const match = file.name.match(/mesh_(\d+_[a-f0-9]+)\.glb$/i);
+      if (match) glbTimestampIds.add(match[1]);
+    }
+    
+    // Filter out video files that match a GLB
+    return generatedFiles.filter(file => {
+      if (file.type === 'mp4' || file.type === 'webm') {
+        const videoMatch = file.name.match(/render_(\d+_[a-f0-9]+)\.(mp4|webm)$/i);
+        if (videoMatch && glbTimestampIds.has(videoMatch[1])) {
+          return false; // Skip - this video is a preview for a GLB
+        }
+      }
+      return true;
+    });
+  });
 
   // Known directory-based models (not discovered via file listing)
   // These models exist in subdirectories with their own structure
@@ -155,13 +236,40 @@
     }));
     
     e.dataTransfer.effectAllowed = 'copy';
+  }
+  
+  // Handle dragging 3D meshes from sidebar to canvas
+  function handleMeshDragStart(e: DragEvent, file: FileInfo) {
+    if (!e.dataTransfer) return;
     
-    // Create a drag image from the thumbnail
-    const target = e.target as HTMLElement;
-    const thumbnail = target.querySelector('.file-thumbnail img') as HTMLImageElement;
-    if (thumbnail) {
-      e.dataTransfer.setDragImage(thumbnail, 50, 50);
-    }
+    // Find matching video preview for this GLB
+    const matchingVideo = findMatchingVideo(file);
+    
+    // Set custom data type for sidebar meshes
+    e.dataTransfer.setData('application/x-sidebar-mesh', JSON.stringify({
+      path: file.path,
+      name: file.name,
+      type: file.type,
+      size: file.size,
+      videoUrl: matchingVideo?.path || null,
+    }));
+    
+    e.dataTransfer.effectAllowed = 'copy';
+  }
+  
+  // Click-to-add: dispatch event to add mesh to canvas
+  function handleMeshClick(file: FileInfo) {
+    // Find matching video preview for this GLB
+    const matchingVideo = findMatchingVideo(file);
+    
+    window.dispatchEvent(new CustomEvent('sidebar-add-mesh', {
+      detail: {
+        path: file.path,
+        name: file.name,
+        type: file.type,
+        videoUrl: matchingVideo?.path || null,
+      }
+    }));
   }
 
   // Handle dragging models from sidebar to canvas
@@ -292,14 +400,14 @@
             <button 
               class="panel-tab"
               class:active={assetsTab === 'imported'}
-              onclick={() => assetsTab = 'imported'}
+              onclick={(e) => { e.stopPropagation(); switchAssetsTab('imported'); }}
             >
               Imported
             </button>
             <button 
               class="panel-tab"
               class:active={assetsTab === 'generated'}
-              onclick={() => assetsTab = 'generated'}
+              onclick={(e) => { e.stopPropagation(); switchAssetsTab('generated'); }}
             >
               Generated
             </button>
@@ -365,7 +473,7 @@
               <p>Loading...</p>
             </div>
           {:else if assetsTab === 'generated'}
-            {#if generatedFiles.length === 0}
+            {#if displayedGeneratedFiles.length === 0}
               <div class="empty-state">
                 <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                   <path d="M3 7v10a2 2 0 002 2h14a2 2 0 002-2V9a2 2 0 00-2-2h-6l-2-2H5a2 2 0 00-2 2z" stroke-linecap="round" stroke-linejoin="round" />
@@ -375,22 +483,85 @@
               </div>
             {:else}
               <div class="file-grid">
-                {#each generatedFiles as file (file.name)}
+                {#each displayedGeneratedFiles as file (file.name)}
                   {#if file.type === 'glb' || file.type === 'gltf'}
+                    {@const matchingVideo = findMatchingVideo(file)}
+                    {@const thumbnailUrl = sidebarThumbnailCache.get(file.path)}
+                    <div class="file-card mesh-card-wrapper">
+                      <button 
+                        class="file-card mesh-card" 
+                        title={`${file.name} (${formatFileSize(file.size)}) - Click to add to canvas, drag to position`}
+                        aria-label={`Add ${file.name} to canvas`}
+                        type="button"
+                        draggable="true"
+                        ondragstart={(e) => handleMeshDragStart(e, file)}
+                        onclick={() => handleMeshClick(file)}
+                      >
+                        {#if matchingVideo}
+                          <!-- Video turntable preview as thumbnail -->
+                          <div class="file-thumbnail video-thumbnail">
+                            <video 
+                              src={matchingVideo.path} 
+                              autoplay 
+                              loop 
+                              muted 
+                              playsinline
+                              draggable="false"
+                            />
+                            <span class="mesh-label">3D</span>
+                          </div>
+                        {:else if thumbnailUrl && thumbnailUrl !== 'loading'}
+                          <!-- GLB thumbnail (generated client-side) -->
+                          <div class="file-thumbnail glb-thumbnail">
+                            <img src={thumbnailUrl} alt="3D mesh preview" draggable="false" />
+                            <span class="mesh-label">3D</span>
+                          </div>
+                        {:else if thumbnailUrl === 'loading'}
+                          <!-- Loading state while generating thumbnail -->
+                          <div class="file-thumbnail mesh-thumbnail">
+                            <div class="thumbnail-spinner"></div>
+                            <span class="mesh-label">3D</span>
+                          </div>
+                        {:else}
+                          <!-- Show placeholder while thumbnail is being generated (triggered by $effect) -->
+                          <div class="file-thumbnail mesh-thumbnail">
+                            <div class="thumbnail-spinner"></div>
+                            <span class="mesh-label">3D</span>
+                          </div>
+                        {/if}
+                      </button>
+                      <button 
+                        class="mesh-preview-btn"
+                        title="Preview 3D model"
+                        aria-label={`Preview ${file.name}`}
+                        type="button"
+                        onclick={(e) => { e.stopPropagation(); previewMeshUrl = file.path; previewMeshName = file.name; }}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                          <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                      </button>
+                    </div>
+                  {:else if file.type === 'mp4' || file.type === 'webm'}
+                    <!-- Standalone video (not linked to a GLB) - rare case -->
                     <button 
-                      class="file-card mesh-card" 
-                      title={`${file.name} (${formatFileSize(file.size)}) - Click to preview 3D model`}
+                      class="file-card video-card" 
+                      title={`${file.name} (${formatFileSize(file.size)}) - Video preview`}
                       aria-label={`Preview ${file.name}`}
                       type="button"
-                      onclick={() => { previewMeshUrl = file.path; previewMeshName = file.name; }}
+                      onclick={() => { previewVideoUrl = file.path; previewVideoName = file.name; }}
                     >
-                      <div class="file-thumbnail mesh-thumbnail">
-                        <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                          <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
-                          <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
-                          <line x1="12" y1="22.08" x2="12" y2="12" />
-                        </svg>
-                        <span class="mesh-label">3D</span>
+                      <div class="file-thumbnail video-thumbnail">
+                        <video 
+                          src={file.path} 
+                          autoplay 
+                          loop 
+                          muted 
+                          playsinline
+                          draggable="false"
+                        />
+                        <span class="video-label">3D</span>
                       </div>
                     </button>
                   {:else}
@@ -580,6 +751,44 @@
             <line x1="12" y1="15" x2="12" y2="3"></line>
           </svg>
           Download GLB
+        </a>
+      </div>
+    </div>
+  </div>
+{/if}
+
+<!-- Video Preview Modal -->
+{#if previewVideoUrl}
+  <div class="video-preview-modal" onclick={() => previewVideoUrl = null} onkeydown={(e) => e.key === 'Escape' && (previewVideoUrl = null)} role="button" tabindex="0">
+    <div class="video-preview-content" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="Video Preview">
+      <div class="video-preview-header">
+        <h3>Turntable Preview</h3>
+        <span class="video-filename">{previewVideoName}</span>
+        <button class="video-preview-close" onclick={() => previewVideoUrl = null} aria-label="Close">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
+      </div>
+      <div class="video-preview-viewer">
+        <video 
+          src={previewVideoUrl} 
+          autoplay 
+          loop 
+          muted 
+          playsinline
+          controls
+        />
+      </div>
+      <div class="video-preview-actions">
+        <a href={previewVideoUrl} download={previewVideoName} class="video-download-btn-large">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Download MP4
         </a>
       </div>
     </div>
@@ -1030,6 +1239,38 @@
     opacity: 0.8;
   }
   
+  /* GLB thumbnail (generated from Three.js) */
+  .glb-thumbnail {
+    position: relative;
+    background: #1a1a1f;
+  }
+  
+  .glb-thumbnail img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+  }
+  
+  .glb-thumbnail .mesh-label {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    padding: 2px 6px;
+    background: rgba(77, 166, 255, 0.9);
+    color: white;
+    border-radius: 4px;
+  }
+  
+  .thumbnail-spinner {
+    width: 24px;
+    height: 24px;
+    border: 2px solid rgba(77, 166, 255, 0.2);
+    border-top-color: #4da6ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  
   .mesh-label {
     font-size: 9px;
     font-weight: 600;
@@ -1038,12 +1279,44 @@
     opacity: 0.8;
   }
   
-  .mesh-card:hover .mesh-thumbnail {
+  .mesh-card-wrapper {
+    position: relative;
+  }
+  
+  .mesh-card-wrapper:hover .mesh-thumbnail {
     background: linear-gradient(135deg, #234b75 0%, #1e3a5f 100%);
   }
   
-  .mesh-card:hover .mesh-thumbnail svg {
+  .mesh-card-wrapper:hover .mesh-thumbnail svg {
     opacity: 1;
+  }
+  
+  .mesh-preview-btn {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.7);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.8);
+    opacity: 0;
+    transition: all 0.15s ease;
+    z-index: 2;
+  }
+  
+  .mesh-card-wrapper:hover .mesh-preview-btn {
+    opacity: 1;
+  }
+  
+  .mesh-preview-btn:hover {
+    background: rgba(99, 102, 241, 0.9);
+    color: white;
   }
   
   /* Hidden by default - only shown when needed */
@@ -1199,6 +1472,162 @@
   
   .mesh-download-btn:hover {
     background: var(--accent-primary-hover, #5855e0);
+    transform: translateY(-1px);
+  }
+  
+  /* Video card styles */
+  .video-card-wrapper {
+    position: relative;
+  }
+  
+  .video-card {
+    background: linear-gradient(145deg, #1a1a2e, #16213e);
+    border: 1px solid rgba(156, 163, 175, 0.2);
+  }
+  
+  .video-card:hover {
+    border-color: rgba(147, 197, 253, 0.4);
+    box-shadow: 0 4px 12px rgba(147, 197, 253, 0.2);
+  }
+  
+  .video-thumbnail {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0d0d12;
+  }
+  
+  .video-thumbnail video {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 6px;
+  }
+  
+  .video-label {
+    position: absolute;
+    bottom: 6px;
+    right: 6px;
+    padding: 2px 6px;
+    background: rgba(77, 166, 255, 0.9);
+    color: white;
+    font-size: 9px;
+    font-weight: 700;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  
+  /* Video preview modal */
+  .video-preview-modal {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.85);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10000;
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.2s ease-out;
+  }
+  
+  .video-preview-content {
+    background: #1a1a2e;
+    border-radius: 12px;
+    border: 1px solid rgba(147, 197, 253, 0.2);
+    overflow: hidden;
+    max-width: 90vw;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+  }
+  
+  .video-preview-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 20px;
+    background: linear-gradient(135deg, rgba(147, 197, 253, 0.1), transparent);
+    border-bottom: 1px solid rgba(147, 197, 253, 0.1);
+  }
+  
+  .video-preview-header h3 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+    color: white;
+  }
+  
+  .video-filename {
+    font-size: 12px;
+    color: rgba(147, 197, 253, 0.8);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  
+  .video-preview-close {
+    width: 28px;
+    height: 28px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.7);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  
+  .video-preview-close:hover {
+    background: rgba(239, 68, 68, 0.2);
+    color: #ef4444;
+  }
+  
+  .video-preview-viewer {
+    padding: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #0d0d12;
+  }
+  
+  .video-preview-viewer video {
+    max-width: 512px;
+    max-height: 512px;
+    border-radius: 8px;
+    background: black;
+  }
+  
+  .video-preview-actions {
+    display: flex;
+    justify-content: center;
+    padding: 16px 20px;
+    border-top: 1px solid rgba(147, 197, 253, 0.1);
+  }
+  
+  .video-download-btn-large {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    background: rgba(147, 197, 253, 0.2);
+    color: rgba(147, 197, 253, 1);
+    border: 1px solid rgba(147, 197, 253, 0.3);
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  
+  .video-download-btn-large:hover {
+    background: rgba(147, 197, 253, 0.3);
     transform: translateY(-1px);
   }
 </style>

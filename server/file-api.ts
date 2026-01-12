@@ -90,8 +90,8 @@ async function listFiles(directory: string): Promise<FileInfo[]> {
       allowedExtensions = ['.safetensors', '.onnx', '.pt', '.pth', '.bin', '.ckpt'];
       break;
     case 'output':
-      // Output includes both images and 3D meshes
-      allowedExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif', '.glb', '.gltf'];
+      // Output includes images, 3D meshes, and turntable videos
+      allowedExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif', '.glb', '.gltf', '.mp4', '.webm'];
       break;
     default:
       allowedExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.avif'];

@@ -61,14 +61,22 @@
             placeholder={meta.placeholder || `Enter ${key}...`}
           ></textarea>
         {:else if meta?.type === 'select'}
+          {@const currentValue = node.params[key] ?? defaultValue}
           <select
             id={`param-${key}`}
             class="param-select"
-            value={node.params[key] as string ?? defaultValue}
-            onchange={(e) => handleParamChange(key, e.currentTarget.value)}
+            value={String(currentValue)}
+            onchange={(e) => {
+              const val = e.currentTarget.value;
+              // Convert back to number if the default was numeric
+              const parsedVal = typeof defaultValue === 'number' ? parseFloat(val) : val;
+              handleParamChange(key, parsedVal);
+            }}
           >
             {#each meta.options || [] as option}
-              <option value={option.value}>{option.label}</option>
+              <option value={String(option.value)} selected={String(option.value) === String(currentValue)}>
+                {option.label}
+              </option>
             {/each}
           </select>
         {:else if meta?.type === 'slider'}
@@ -183,15 +191,33 @@
   .param-select {
     cursor: pointer;
     appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
     background-position: right 12px center;
     padding-right: 36px;
+    /* Ensure text is always visible */
+    color: var(--text-primary);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    overflow: hidden;
+  }
+  
+  /* Fix for Webkit browsers where select text can disappear */
+  .param-select::-ms-expand {
+    display: none;
   }
   
   .param-select option {
     background: var(--bg-secondary);
     color: var(--text-primary);
+    padding: 8px;
+  }
+  
+  .param-select option:checked {
+    background: var(--accent-primary);
+    color: white;
   }
   
   /* Slider styles */

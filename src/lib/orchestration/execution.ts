@@ -456,12 +456,19 @@ class ExecutionEngine {
       throw new Error(`Invalid image input: "${inputImage.substring(0, 50)}...". Expected a URL or base64 data.`);
     }
     
-    // Build TripoSR request
+    // Build TripoSR request with all parameters
     const request: TripoSRRequest = {
       inputImage,
       foregroundRatio: (node.params.foreground_ratio as number) ?? 0.85,
       mcResolution: (node.params.mc_resolution as number) ?? 256,
       removeBackground: (node.params.remove_background as boolean) ?? true,
+      chunkSize: (node.params.chunk_size as number) ?? 8192,
+      bakeTexture: (node.params.bake_texture as boolean) ?? false,
+      textureResolution: (node.params.texture_resolution as number) ?? 2048,
+      // Video preview parameters
+      renderVideo: (node.params.render_video as boolean) ?? true,
+      renderNViews: (node.params.render_n_views as number) ?? 30,
+      renderResolution: (node.params.render_resolution as number) ?? 256,
     };
     
     // Run TripoSR inference
@@ -485,13 +492,17 @@ class ExecutionEngine {
    */
   private createOrUpdateMeshOutputNode(
     modelNode: NodeInstance,
-    result: { meshPath: string; previewUrl: string | null; outputPath: string; timeTaken: number; vertices: number; faces: number }
+    result: { meshPath: string; videoUrl: string | null; previewUrl: string | null; outputPath: string; timeTaken: number; meshTime: number; videoTime: number | null; vertices: number; faces: number }
   ): string {
     // Extract generation parameters from model node
     const generationParams = {
       foregroundRatio: modelNode.params.foreground_ratio as number || 0.85,
       mcResolution: modelNode.params.mc_resolution as number || 256,
       removeBackground: modelNode.params.remove_background as boolean || true,
+      chunkSize: modelNode.params.chunk_size as number || 8192,
+      bakeTexture: modelNode.params.bake_texture as boolean || false,
+      textureResolution: modelNode.params.texture_resolution as number || 2048,
+      renderVideo: modelNode.params.render_video as boolean || true,
       modelName: modelNode.params.modelName as string || 'TripoSR Base',
     };
     
@@ -523,15 +534,18 @@ class ExecutionEngine {
     // Create mesh output node
     const outputNodeId = graphStore.addNode('mesh-output', outputX, outputY, {
       meshUrl: result.meshPath,
+      videoUrl: result.videoUrl || '',
       previewUrl: result.previewUrl || '',
       outputPath: result.outputPath,
       timeTaken: Math.round(result.timeTaken),
+      meshTime: Math.round(result.meshTime),
+      videoTime: result.videoTime ? Math.round(result.videoTime) : null,
       vertices: result.vertices,
       faces: result.faces,
       generationParams,
     }, BASE_OUTPUT_SIZE, BASE_OUTPUT_SIZE);
     
-    // Set thumbnail
+    // Set thumbnail (prefer video for animated preview, fallback to static)
     graphStore.updateNode(outputNodeId, {
       thumbnailUrl: result.previewUrl || '',
     });

@@ -17,6 +17,7 @@
     PORT_HANDLE_RADIUS,
   } from '../canvas/ports';
   import { arePortsCompatible } from '../graph/types';
+  import { generateGLBThumbnail } from './glb-thumbnail';
   
   // Renderer interface
   interface IRenderer {
@@ -118,6 +119,7 @@
     window.addEventListener('sidebar-add-image', handleSidebarAddImage as EventListener);
     window.addEventListener('sidebar-add-model', handleSidebarAddModel as EventListener);
     window.addEventListener('sidebar-add-triposr', handleSidebarAddTripoSR as EventListener);
+    window.addEventListener('sidebar-add-mesh', handleSidebarAddMesh as EventListener);
     
     // Set up execution engine callbacks for UI behaviors
     // This keeps UI logic (timeouts, node selection) in the UI layer
@@ -203,6 +205,7 @@
     window.removeEventListener('sidebar-add-image', handleSidebarAddImage as EventListener);
     window.removeEventListener('sidebar-add-model', handleSidebarAddModel as EventListener);
     window.removeEventListener('sidebar-add-triposr', handleSidebarAddTripoSR as EventListener);
+    window.removeEventListener('sidebar-add-mesh', handleSidebarAddMesh as EventListener);
   });
   
   async function initRenderer() {
@@ -1110,15 +1113,16 @@
     e.preventDefault();
   }
   
-  // Drag and drop handlers for images
+  // Drag and drop handlers for images, models, and meshes
   function handleDragOver(e: DragEvent) {
     e.preventDefault();
     e.stopPropagation();
     
-    // Check if the drag contains files (images), sidebar images, or models
+    // Check if the drag contains files (images), sidebar images, models, or meshes
     if (e.dataTransfer?.types.includes('Files') || 
         e.dataTransfer?.types.includes('application/x-sidebar-image') ||
-        e.dataTransfer?.types.includes('application/x-sidebar-model')) {
+        e.dataTransfer?.types.includes('application/x-sidebar-model') ||
+        e.dataTransfer?.types.includes('application/x-sidebar-mesh')) {
       e.dataTransfer.dropEffect = 'copy';
       isDragOver = true;
     }
@@ -1166,6 +1170,18 @@
         await addImageNodeFromPath(path, name, dropWorld.x, dropWorld.y, 0);
       } catch (error) {
         console.error('Error processing sidebar image drop:', error);
+      }
+      return;
+    }
+    
+    // Check if it's a sidebar mesh drop (GLB/GLTF)
+    const sidebarMeshData = e.dataTransfer?.getData('application/x-sidebar-mesh');
+    if (sidebarMeshData) {
+      try {
+        const { path, name, videoUrl } = JSON.parse(sidebarMeshData);
+        addMeshOutputNode(path, name, dropWorld.x, dropWorld.y, videoUrl);
+      } catch (error) {
+        console.error('Error processing sidebar mesh drop:', error);
       }
       return;
     }
@@ -1275,6 +1291,40 @@
     graphStore.selectNode(newId, false);
   }
   
+  // Helper function to add a mesh output node (for GLB files from sidebar)
+  function addMeshOutputNode(meshPath: string, filename: string, worldX: number, worldY: number, videoUrl?: string | null) {
+    const nodeWidth = NODE_SIZE;
+    const nodeHeight = NODE_SIZE;
+    
+    const x = worldX - nodeWidth / 2;
+    const y = worldY - nodeHeight / 2;
+    
+    const newId = graphStore.addNode(
+      'mesh-output',
+      x,
+      y,
+      {
+        meshUrl: meshPath,
+        videoUrl: videoUrl || '',
+        outputPath: meshPath,
+        filename: filename,
+      },
+      nodeWidth,
+      nodeHeight
+    );
+    
+    // Track for fade-in animation
+    newlyAddedNodeIds = new Set(newlyAddedNodeIds).add(newId);
+    
+    setTimeout(() => {
+      const updated = new Set(newlyAddedNodeIds);
+      updated.delete(newId);
+      newlyAddedNodeIds = updated;
+    }, 100);
+    
+    graphStore.selectNode(newId, false);
+  }
+  
   // Calculate the center of the visible canvas in world coordinates
   // Accounts for the left sidebar width when open
   function getVisibleCenterWorld(): { x: number; y: number } {
@@ -1342,6 +1392,22 @@
     
     // Add the TripoSR node
     addTripoSRNode(worldX, worldY);
+  }
+  
+  // Handle sidebar click-to-add mesh (GLB) event
+  function handleSidebarAddMesh(e: CustomEvent) {
+    const { path, name, videoUrl } = e.detail;
+    
+    // Calculate position at center of visible canvas with offset
+    const center = getVisibleCenterWorld();
+    const worldX = center.x + clickAddOffset - NODE_SIZE / 2;
+    const worldY = center.y + clickAddOffset - NODE_SIZE / 2;
+    
+    // Increment offset for next item
+    clickAddOffset += CLICK_ADD_OFFSET_INCREMENT;
+    
+    // Add the mesh output node with video preview
+    addMeshOutputNode(path, name, worldX, worldY, videoUrl);
   }
   
   // Helper function to add an image node from a path
@@ -1510,9 +1576,10 @@
     error: string | null;
   }>>([]);
   
-  // Model nodes rendered as DOM overlays
+  // Model nodes rendered as DOM overlays (SD and TripoSR)
   let modelNodes = $state<Array<{
     id: string;
+    nodeType: string;
     modelName: string;
     modelType: string;
     modelSize: number;
@@ -1520,6 +1587,12 @@
     modelArchitecture?: string;
     modelResolution?: string;
     modelLicense?: string;
+    // Custom meta lines for display
+    metaLine1?: string;
+    metaLine2?: string;
+    metaLine3?: string;
+    metaLine4?: string;
+    metaLine5?: string;
     screenX: number;
     screenY: number;
     screenWidth: number;
@@ -1554,7 +1627,9 @@
   let meshOutputNodes = $state<Array<{
     id: string;
     meshUrl: string;
+    videoUrl: string;
     previewUrl: string;
+    thumbnailUrl: string; // Generated from GLB using Three.js
     outputPath: string;
     filename: string;
     screenX: number;
@@ -1570,6 +1645,9 @@
     vertices: number;
     faces: number;
   }>>([]);
+  
+  // Cache for generated GLB thumbnails
+  let glbThumbnailCache = $state<Map<string, string>>(new Map());
   
   // Port overlays computed separately to avoid performance issues
   // Only show ports for hovered/selected nodes or when connecting
@@ -1622,7 +1700,7 @@
       });
     
     modelNodes = allNodes
-      .filter(node => node.type === 'model')
+      .filter(node => node.type === 'model' || node.type === 'triposr')
       .map(node => {
         const topLeft = renderer.worldToScreen(node.x, node.y, cam);
         const bottomRight = renderer.worldToScreen(
@@ -1631,15 +1709,33 @@
           cam
         );
         
+        // Determine model info based on node type
+        const isTripoSR = node.type === 'triposr';
+        
         return {
           id: node.id,
-          modelName: node.params.modelName as string,
-          modelType: node.params.modelType as string,
+          nodeType: node.type,
+          modelName: isTripoSR 
+            ? (node.params.modelName as string || 'TripoSR Base')
+            : (node.params.modelName as string),
+          modelType: isTripoSR ? '3D' : (node.params.modelType as string),
           modelSize: node.params.modelSize as number,
-          modelTitle: node.params.modelTitle as string | undefined,
-          modelArchitecture: node.params.modelArchitecture as string | undefined,
-          modelResolution: node.params.modelResolution as string | undefined,
+          modelTitle: isTripoSR 
+            ? 'TripoSR' 
+            : (node.params.modelTitle as string | undefined),
+          modelArchitecture: isTripoSR 
+            ? 'Transformer + NeRF' 
+            : (node.params.modelArchitecture as string | undefined),
+          modelResolution: isTripoSR 
+            ? '512' 
+            : (node.params.modelResolution as string | undefined),
           modelLicense: node.params.modelLicense as string | undefined,
+          // TripoSR-specific metadata lines
+          metaLine1: isTripoSR ? 'TripoSR Base' : (node.params.modelArchitecture as string || node.params.modelName as string || 'model'),
+          metaLine2: isTripoSR ? '(3D RECONSTRUCTION)' : `(${(node.params.modelType as string)?.toUpperCase() || 'MODEL'})`,
+          metaLine3: isTripoSR ? 'Single image to mesh' : 'Neural network weights',
+          metaLine4: isTripoSR ? 'Triplane NeRF decoder' : 'Image denoising core',
+          metaLine5: isTripoSR ? 'Marching cubes extraction' : 'Encodes/decodes latent space',
           screenX: topLeft.x,
           screenY: topLeft.y,
           screenWidth: bottomRight.x - topLeft.x,
@@ -1685,9 +1781,9 @@
         };
       });
     
-    // Mesh output nodes (TripoSR generated 3D meshes)
+    // Mesh output nodes (generated 3D meshes from TripoSR)
     meshOutputNodes = allNodes
-      .filter(node => node.type === 'mesh-output' || node.type === 'triposr')
+      .filter(node => node.type === 'mesh-output')
       .map(node => {
         const topLeft = renderer.worldToScreen(node.x, node.y, cam);
         const bottomRight = renderer.worldToScreen(
@@ -1699,11 +1795,14 @@
         // Extract filename from outputPath
         const outputPath = node.params.outputPath as string;
         const filename = outputPath ? outputPath.split('/').pop() || '3D Output' : '3D Output';
+        const meshUrl = (node.params.meshUrl) as string || '';
         
         return {
           id: node.id,
-          meshUrl: (node.params.meshUrl) as string || '',
+          meshUrl,
+          videoUrl: (node.params.videoUrl) as string || '',
           previewUrl: (node.thumbnailUrl || node.params.previewUrl) as string || '',
+          thumbnailUrl: glbThumbnailCache.get(meshUrl) || '', // Use cached thumbnail
           outputPath,
           filename,
           screenX: topLeft.x,
@@ -1720,6 +1819,36 @@
           faces: (node.params.faces as number) || 0,
         };
       });
+  });
+  
+  // Generate GLB thumbnails for mesh output nodes that don't have video
+  $effect(() => {
+    const allNodes = Array.from(graphStore.nodes.values());
+    const meshNodes = allNodes.filter(node => node.type === 'mesh-output');
+    
+    for (const node of meshNodes) {
+      const meshUrl = (node.params.meshUrl) as string || '';
+      const videoUrl = (node.params.videoUrl) as string || '';
+      
+      // Generate thumbnail if we have a mesh URL but no video and no cached thumbnail
+      if (meshUrl && !videoUrl && !glbThumbnailCache.has(meshUrl)) {
+        // Set a placeholder to prevent multiple generations
+        glbThumbnailCache.set(meshUrl, 'loading');
+        
+        // Generate thumbnail asynchronously
+        generateGLBThumbnail(meshUrl, { width: 256, height: 256 })
+          .then(dataUrl => {
+            glbThumbnailCache = new Map(glbThumbnailCache).set(meshUrl, dataUrl);
+          })
+          .catch(err => {
+            console.error('Failed to generate GLB thumbnail:', err);
+            // Remove the loading placeholder on error
+            const newCache = new Map(glbThumbnailCache);
+            newCache.delete(meshUrl);
+            glbThumbnailCache = newCache;
+          });
+      }
+    }
   });
   
   // Port overlays computed as derived - only for hovered/selected nodes
@@ -2036,13 +2165,13 @@
           </div>
         {:else}
           <!-- Model metadata content -->
-          <div class="model-metadata-content">
-            <div class="model-meta-line">{model.modelArchitecture || model.modelName || 'model'}</div>
-            <div class="model-meta-line">({model.modelType?.toUpperCase() || 'MODEL'})</div>
-            <div class="model-meta-line">Neural network weights</div>
-            <div class="model-meta-line">Image denoising core</div>
-            <div class="model-meta-line">Encodes/decodes latent space</div>
-            {#if model.modelResolution}
+          <div class="model-metadata-content" class:triposr={model.nodeType === 'triposr'}>
+            <div class="model-meta-line">{model.metaLine1 || model.modelName || 'model'}</div>
+            <div class="model-meta-line">{model.metaLine2 || `(${model.modelType?.toUpperCase() || 'MODEL'})`}</div>
+            <div class="model-meta-line">{model.metaLine3 || ''}</div>
+            <div class="model-meta-line">{model.metaLine4 || ''}</div>
+            <div class="model-meta-line">{model.metaLine5 || ''}</div>
+            {#if model.modelResolution && model.nodeType !== 'triposr'}
               <div class="model-meta-line">Resolution ({model.modelResolution})</div>
             {/if}
             {#if model.modelLicense}
@@ -2151,7 +2280,78 @@
         class:error={meshNode.status === 'error'}
         style={`width: ${meshNode.screenWidth}px; height: ${meshNode.screenHeight}px; border-radius: ${meshNode.borderRadius}px;`}
       >
-        {#if meshNode.previewUrl}
+        {#if meshNode.videoUrl}
+          <!-- Video preview (turntable render) - only if explicitly generated -->
+          <video 
+            src={meshNode.videoUrl} 
+            autoplay
+            loop
+            muted
+            playsinline
+            class="mesh-video-preview"
+            draggable="false"
+          />
+          <!-- 3D badge -->
+          <div class="mesh-badge">3D</div>
+          <!-- Hover overlay -->
+          {#if meshNode.isHovered && !meshNode.isSelected}
+            <div class="image-hover-overlay"></div>
+          {/if}
+          <!-- Connector icon for mesh output -->
+          <div 
+            class="node-connector-icon" 
+            class:visible={meshNode.isHovered}
+            class:dragging={isConnecting && connectionStart?.nodeId === meshNode.id}
+            onpointerdown={(e) => handleConnectorMouseDown(e, meshNode.id, 'mesh')}
+            onmouseenter={() => handleConnectorMouseEnter(meshNode.id)}
+            onmouseleave={handleConnectorMouseLeave}
+            role="button"
+            tabindex="-1"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 8v8M8 12h8" />
+            </svg>
+          </div>
+        {:else if meshNode.thumbnailUrl && meshNode.thumbnailUrl !== 'loading'}
+          <!-- GLB thumbnail (generated client-side using Three.js) -->
+          <img 
+            src={meshNode.thumbnailUrl} 
+            alt="3D mesh preview"
+            draggable="false"
+          />
+          <!-- 3D badge -->
+          <div class="mesh-badge">3D</div>
+          <!-- Hover overlay -->
+          {#if meshNode.isHovered && !meshNode.isSelected}
+            <div class="image-hover-overlay"></div>
+          {/if}
+          <!-- Connector icon for mesh output -->
+          <div 
+            class="node-connector-icon" 
+            class:visible={meshNode.isHovered}
+            class:dragging={isConnecting && connectionStart?.nodeId === meshNode.id}
+            onpointerdown={(e) => handleConnectorMouseDown(e, meshNode.id, 'mesh')}
+            onmouseenter={() => handleConnectorMouseEnter(meshNode.id)}
+            onmouseleave={handleConnectorMouseLeave}
+            role="button"
+            tabindex="-1"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="9" />
+              <path d="M12 8v8M8 12h8" />
+            </svg>
+          </div>
+        {:else if meshNode.thumbnailUrl === 'loading'}
+          <!-- Loading state while generating thumbnail -->
+          <div class="mesh-placeholder">
+            <div class="thumbnail-loading-spinner"></div>
+            <span>Generating preview...</span>
+          </div>
+          <!-- 3D badge -->
+          <div class="mesh-badge">3D</div>
+        {:else if meshNode.previewUrl}
+          <!-- Static image preview (fallback) -->
           <img 
             src={meshNode.previewUrl} 
             alt="3D mesh preview"
@@ -2641,7 +2841,7 @@
     flex-direction: column;
     align-items: flex-start;
     justify-content: flex-start;
-    padding: 16px;
+    padding: 10px;
     gap: 0;
     user-select: none;
     -webkit-user-select: none;
@@ -2677,6 +2877,12 @@
     width: 100%;
     height: 100%;
     gap: 0;
+    /* No padding here - parent has padding: 10px */
+  }
+  
+  /* TripoSR variant styling */
+  .model-metadata-content.triposr {
+    /* Same styling as SD for consistency */
   }
   
   .model-meta-line {
@@ -2933,6 +3139,17 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     pointer-events: none;
+    z-index: 2;
+  }
+  
+  /* Video preview for mesh output nodes */
+  .mesh-video-preview {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+    background: #1a1a1f;
+    pointer-events: none;
   }
   
   .mesh-placeholder {
@@ -2975,6 +3192,15 @@
   .mesh-spinner {
     width: 24px;
     height: 24px;
+    border: 2px solid rgba(77, 166, 255, 0.2);
+    border-top-color: #4da6ff;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+  }
+  
+  .thumbnail-loading-spinner {
+    width: 32px;
+    height: 32px;
     border: 2px solid rgba(77, 166, 255, 0.2);
     border-top-color: #4da6ff;
     border-radius: 50%;

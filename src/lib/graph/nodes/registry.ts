@@ -251,13 +251,45 @@ export const nodeRegistry: Record<string, ExtendedNodeDefinition> = {
       // Model info
       modelPath: '',
       modelName: 'TripoSR Base',
-      // Generation parameters
-      foreground_ratio: 0.85,
-      mc_resolution: 256,
-      remove_background: true,
+      // Generation parameters - optimized for local/MPS execution
+      mc_resolution: 256,        // 64-512: Higher = more detail, slower
+      chunk_size: 8192,          // 1024-16384: Lower = less VRAM, slower
+      foreground_ratio: 0.85,    // 0.5-1.0: Object size in frame
+      remove_background: true,   // Auto remove background
+      bake_texture: false,       // UV texture vs vertex colors
+      texture_resolution: 2048,  // 512-4096: Texture atlas size (if baking)
+      // Video preview parameters (NeRF rendering is slow - ~2s/frame)
+      // Off by default - GLB thumbnail is generated client-side instead
+      render_video: false,       // Generate turntable MP4 (optional, slow)
+      render_n_views: 24,        // 24 frames at 12fps = 2s smooth rotation
+      render_resolution: 256,    // 256px for better quality if enabled
     },
     parameterMeta: {
       // Mesh generation parameters
+      mc_resolution: {
+        type: 'select',
+        label: 'Mesh Resolution',
+        options: [
+          { value: 64, label: '64 (Draft)' },
+          { value: 128, label: '128 (Fast)' },
+          { value: 256, label: '256 (Balanced)' },
+          { value: 384, label: '384 (Detailed)' },
+          { value: 512, label: '512 (High Quality)' },
+        ],
+        group: 'sampler',
+      },
+      chunk_size: {
+        type: 'select',
+        label: 'Chunk Size (VRAM)',
+        options: [
+          { value: 1024, label: '1024 (Low VRAM)' },
+          { value: 2048, label: '2048' },
+          { value: 4096, label: '4096' },
+          { value: 8192, label: '8192 (Default)' },
+          { value: 16384, label: '16384 (Fast, High VRAM)' },
+        ],
+        group: 'sampler',
+      },
       foreground_ratio: {
         type: 'slider',
         label: 'Foreground Ratio',
@@ -266,20 +298,53 @@ export const nodeRegistry: Record<string, ExtendedNodeDefinition> = {
         step: 0.05,
         group: 'sampler',
       },
-      mc_resolution: {
-        type: 'select',
-        label: 'Mesh Resolution',
-        options: [
-          { value: 128, label: '128 (Fast)' },
-          { value: 256, label: '256 (Balanced)' },
-          { value: 512, label: '512 (High Quality)' },
-        ],
-        group: 'sampler',
-      },
       remove_background: {
         type: 'boolean',
         label: 'Auto Remove Background',
         group: 'sampler',
+      },
+      bake_texture: {
+        type: 'boolean',
+        label: 'Bake UV Texture',
+        group: 'output',
+      },
+      texture_resolution: {
+        type: 'select',
+        label: 'Texture Resolution',
+        options: [
+          { value: 512, label: '512' },
+          { value: 1024, label: '1024' },
+          { value: 2048, label: '2048 (Default)' },
+          { value: 4096, label: '4096 (High Quality)' },
+        ],
+        group: 'output',
+      },
+      // Video preview parameters
+      render_video: {
+        type: 'boolean',
+        label: 'Generate Video Preview',
+        group: 'preview',
+      },
+      render_n_views: {
+        type: 'select',
+        label: 'Preview Frames',
+        options: [
+          { value: 12, label: '12 frames (1s @ 12fps)' },
+          { value: 24, label: '24 frames (2s @ 12fps)' },
+          { value: 36, label: '36 frames (3s @ 12fps)' },
+          { value: 48, label: '48 frames (4s @ 12fps)' },
+        ],
+        group: 'preview',
+      },
+      render_resolution: {
+        type: 'select',
+        label: 'Preview Resolution',
+        options: [
+          { value: 128, label: '128px (fast)' },
+          { value: 192, label: '192px (medium)' },
+          { value: 256, label: '256px (high quality)' },
+        ],
+        group: 'preview',
       },
       // Hidden model params
       modelPath: { type: 'string', group: 'model' },
