@@ -28,9 +28,14 @@
     sidebarState.isOpen = activePanel !== null;
   });
   
-  // Listen for external close requests (e.g., clicking on canvas)
+  // Listen for external open/close requests (e.g., Cmd+K or clicking on canvas)
   $effect(() => {
-    if (!sidebarState.isOpen && activePanel !== null) {
+    if (sidebarState.isOpen && activePanel === null) {
+      // External request to open - default to 'assets' panel
+      activePanel = 'assets';
+      refreshAssets();
+    } else if (!sidebarState.isOpen && activePanel !== null) {
+      // External request to close
       activePanel = null;
     }
   });
@@ -154,6 +159,19 @@
         title: 'TripoSR',
         description: 'Single-image to 3D mesh generation',
         architecture: 'triposr',
+      }
+    },
+    {
+      name: 'sdxl-turbo',
+      path: '', // Not yet available
+      size: 0,
+      modified: new Date().toISOString(),
+      type: 'sdxl',
+      metadata: {
+        title: 'SDXL Turbo',
+        description: 'Fast text-to-image generation (Coming Soon)',
+        architecture: 'sdxl-turbo',
+        inactive: true, // Placeholder - not yet implemented
       }
     }
   ];
@@ -635,20 +653,28 @@
               {#each modelFiles as file (file.name)}
                 <button 
                   class="file-item model-item" 
-                  title={file.metadata?.description || file.name}
-                  aria-label={`Add ${file.metadata?.title || file.name} to canvas`}
-                  draggable="true"
-                  ondragstart={(e) => handleModelDragStart(e, file)}
-                  onclick={() => handleModelClick(file)}
+                  class:inactive={file.metadata?.inactive}
+                  title={file.metadata?.inactive ? `${file.metadata?.title || file.name} (Coming Soon)` : (file.metadata?.description || file.name)}
+                  aria-label={file.metadata?.inactive ? `${file.metadata?.title || file.name} - Coming Soon` : `Add ${file.metadata?.title || file.name} to canvas`}
+                  draggable={!file.metadata?.inactive}
+                  ondragstart={(e) => !file.metadata?.inactive && handleModelDragStart(e, file)}
+                  onclick={() => !file.metadata?.inactive && handleModelClick(file)}
                   type="button"
+                  disabled={file.metadata?.inactive}
                 >
-                  <div class="model-icon" class:triposr={file.type === 'triposr'}>
+                  <div class="model-icon" class:triposr={file.type === 'triposr'} class:sdxl={file.type === 'sdxl'}>
                     {#if file.type === 'triposr'}
                       <!-- 3D cube icon for TripoSR -->
                       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                         <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />
                         <polyline points="3.27 6.96 12 12.01 20.73 6.96" />
                         <line x1="12" y1="22.08" x2="12" y2="12" />
+                      </svg>
+                    {:else if file.type === 'sdxl'}
+                      <!-- Sparkle icon for SDXL -->
+                      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707" />
+                        <circle cx="12" cy="12" r="4" />
                       </svg>
                     {:else}
                       <!-- Layer stack icon for SD/other models -->
@@ -663,7 +689,9 @@
                     <span class="file-name">{file.metadata?.title || file.name}</span>
                     <div class="model-meta">
                       <span class="model-type">{file.type === 'triposr' ? '3D' : file.type.toUpperCase()}</span>
-                      {#if file.size > 0}
+                      {#if file.metadata?.inactive}
+                        <span class="model-badge inactive">Coming Soon</span>
+                      {:else if file.size > 0}
                         <span class="file-size">{formatFileSize(file.size)}</span>
                       {/if}
                     </div>
@@ -1074,6 +1102,37 @@
   
   .model-icon.triposr svg {
     color: #10b981;
+  }
+  
+  .model-icon.sdxl {
+    background: rgba(168, 85, 247, 0.15);
+  }
+  
+  .model-icon.sdxl svg {
+    color: #a855f7;
+  }
+  
+  /* Inactive model styling */
+  .model-item.inactive {
+    opacity: 0.5;
+    cursor: not-allowed;
+    pointer-events: none;
+  }
+  
+  .model-item.inactive:hover {
+    background: transparent;
+    border-color: transparent;
+  }
+  
+  .model-badge.inactive {
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.5);
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 9px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
   }
   
   .model-description {

@@ -11,6 +11,7 @@ export interface ModelMetadata {
   architecture?: string;
   resolution?: string;
   license?: string;
+  inactive?: boolean; // Mark model as placeholder/coming soon
 }
 
 export interface FileInfo {

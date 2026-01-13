@@ -156,9 +156,10 @@ export class Canvas2DRenderer {
       this.drawPendingConnection(ctx, this.pendingConnection);
     }
     
-    // Draw nodes (skip image and model nodes - they're rendered as DOM overlays)
+    // Draw nodes (skip image, model, triposr, mesh-output, and output nodes - they're rendered as DOM overlays)
+    const skippedTypes = ['image', 'model', 'triposr', 'mesh-output', 'output'];
     nodes.forEach((node) => {
-      if (node.type !== 'image' && node.type !== 'model') {
+      if (!skippedTypes.includes(node.type)) {
         const isSelected = selectedIds.has(node.id);
         const isHovered = this.hoveredNodeId === node.id && !isSelected;
         this.drawNode(ctx, node, isSelected, isHovered);

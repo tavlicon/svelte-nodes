@@ -473,8 +473,9 @@ export class CanvasRenderer {
   private updateNodeBuffer(nodes: Map<string, NodeInstance>, selectedIds: Set<string>) {
     if (!this.device || !this.nodeBuffer) return;
     
-    // Filter out image and model nodes (they're rendered as DOM overlays)
-    const nodeArray = Array.from(nodes.values()).filter(n => n.type !== 'image' && n.type !== 'model');
+    // Filter out nodes rendered as DOM overlays (image, model, triposr, mesh-output, output)
+    const skippedTypes = ['image', 'model', 'triposr', 'mesh-output', 'output'];
+    const nodeArray = Array.from(nodes.values()).filter(n => !skippedTypes.includes(n.type));
     const count = Math.min(nodeArray.length, this.maxNodes);
     
     const data = new Float32Array(count * 12); // 12 floats per node

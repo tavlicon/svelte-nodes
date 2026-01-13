@@ -4,7 +4,7 @@
   import UIIndexPage from './lib/pages/UIIndexPage.svelte';
   import PanelsPage from './lib/pages/PanelsPage.svelte';
   import ComponentsPage from './lib/pages/ComponentsPage.svelte';
-  import Toolbar from './lib/ui/Toolbar.svelte';
+  import BackendStatus from './lib/ui/BackendStatus.svelte';
   import { theme } from './lib/ui/theme.svelte';
   import { router, type Page } from './lib/router.svelte';
   
@@ -55,7 +55,7 @@
   
   <div class="main-area">
     {#if router.page === 'canvas'}
-      <Toolbar />
+      <BackendStatus />
     {:else if router.isUISection}
       <!-- UI header with optional breadcrumb and theme toggle -->
       <header class="ui-header">

@@ -1,5 +1,7 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { tweened } from 'svelte/motion';
+  import { cubicOut } from 'svelte/easing';
   import { CanvasRenderer } from '../canvas/renderer';
   import { Canvas2DRenderer } from '../canvas/renderer-2d';
   import { getNodesInRect } from '../canvas/interaction';
@@ -117,6 +119,13 @@
     document.addEventListener('keydown', handleKeyDown, true);
     window.addEventListener('keyup', handleKeyUp);
     
+    // Set up tweened camera subscription for smooth zoom animations
+    unsubscribeTweenedCamera = tweenedCamera.subscribe(cam => {
+      if (isAnimatingCamera) {
+        graphStore.setCamera(cam);
+      }
+    });
+    
     // Listen for sidebar click-to-add events
     window.addEventListener('sidebar-add-image', handleSidebarAddImage as EventListener);
     window.addEventListener('sidebar-add-model', handleSidebarAddModel as EventListener);
@@ -200,6 +209,7 @@
   
   onDestroy(() => {
     if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    unsubscribeTweenedCamera?.();
     resizeObserver?.disconnect();
     renderer?.destroy();
     document.removeEventListener('keydown', handleKeyDown, true);
@@ -348,7 +358,45 @@
     const camX = viewportWidth / (2 * finalZoom) - contentCenterX;
     const camY = viewportHeight / (2 * finalZoom) - contentCenterY;
     
-    graphStore.setCamera({ x: camX, y: camY, zoom: finalZoom });
+    animateCameraTo({ x: camX, y: camY, zoom: finalZoom }, 400);
+  }
+  
+  // Svelte tweened store for smooth keyboard zoom animations
+  const tweenedCamera = tweened(
+    { x: 0, y: 0, zoom: 1 },
+    { duration: 200, easing: cubicOut }
+  );
+  
+  let isAnimatingCamera = false;
+  let unsubscribeTweenedCamera: (() => void) | null = null;
+  
+  // Animated camera transition for smooth zoom
+  function animateCameraTo(
+    target: { x?: number; y?: number; zoom?: number },
+    duration = 200
+  ) {
+    const current = {
+      x: graphStore.camera.x,
+      y: graphStore.camera.y,
+      zoom: graphStore.camera.zoom,
+    };
+    
+    isAnimatingCamera = true;
+    
+    // Initialize to current position first
+    tweenedCamera.set(current, { duration: 0 });
+    
+    // Then animate to target
+    tweenedCamera.set(
+      {
+        x: target.x ?? current.x,
+        y: target.y ?? current.y,
+        zoom: target.zoom ?? current.zoom,
+      },
+      { duration }
+    ).then(() => {
+      isAnimatingCamera = false;
+    });
   }
   
   // Hit test nodes (returns topmost hit)
@@ -455,7 +503,7 @@
     if ((e.key === '=' || e.key === '+') && (e.metaKey || e.ctrlKey) && !isInInput) {
       e.preventDefault();
       e.stopPropagation();
-      graphStore.setCamera({ zoom: Math.min(5, graphStore.camera.zoom * 1.2) });
+      animateCameraTo({ zoom: Math.min(5, graphStore.camera.zoom * 1.2) }, 200);
       return;
     }
     
@@ -463,7 +511,23 @@
     if (e.key === '-' && (e.metaKey || e.ctrlKey) && !isInInput) {
       e.preventDefault();
       e.stopPropagation();
-      graphStore.setCamera({ zoom: Math.max(MIN_ZOOM, graphStore.camera.zoom * 0.8) });
+      animateCameraTo({ zoom: Math.max(MIN_ZOOM, graphStore.camera.zoom * 0.8) }, 200);
+      return;
+    }
+    
+    // Reset zoom: Cmd/Ctrl + 0
+    if (e.key === '0' && (e.metaKey || e.ctrlKey) && !isInInput) {
+      e.preventDefault();
+      e.stopPropagation();
+      animateCameraTo({ zoom: 1 }, 250);
+      return;
+    }
+    
+    // Toggle left assets sidebar: Cmd/Ctrl + K
+    if (e.key === 'k' && (e.metaKey || e.ctrlKey) && !isInInput) {
+      e.preventDefault();
+      e.stopPropagation();
+      sidebarState.isOpen = !sidebarState.isOpen;
       return;
     }
     
@@ -2202,7 +2266,11 @@
     >
         {#if model.status === 'running'}
           <div class="model-status-indicator running">
-            <div class="spinner"></div>
+            <!-- Custom volt loader -->
+            <svg class="volt-loader" width="69" height="69" viewBox="0 0 69 69" fill="none">
+              <circle cx="34.5" cy="34.5" r="33.1337" stroke="white" stroke-opacity="0.12" stroke-width="2.73267"/>
+              <path class="volt-arc" d="M34.5 1.36634C40.3162 1.36634 46.0299 2.89732 51.0668 5.80541C56.1038 8.7135 60.2865 12.8962 63.1946 17.9332C66.1027 22.9701 67.6337 28.6838 67.6337 34.5C67.6337 40.3162 66.1027 46.0299 63.1946 51.0668" stroke="#BDFB72" stroke-width="2.73267"/>
+            </svg>
           </div>
         {:else if model.status === 'error'}
           <div class="model-status-indicator error">
@@ -2396,7 +2464,11 @@
         {/if}
         {#if meshNode.status === 'running'}
           <div class="mesh-loading-overlay">
-            <div class="mesh-spinner"></div>
+            <!-- Custom volt loader -->
+            <svg class="volt-loader" width="69" height="69" viewBox="0 0 69 69" fill="none">
+              <circle cx="34.5" cy="34.5" r="33.1337" stroke="white" stroke-opacity="0.12" stroke-width="2.73267"/>
+              <path class="volt-arc" d="M34.5 1.36634C40.3162 1.36634 46.0299 2.89732 51.0668 5.80541C56.1038 8.7135 60.2865 12.8962 63.1946 17.9332C66.1027 22.9701 67.6337 28.6838 67.6337 34.5C67.6337 40.3162 66.1027 46.0299 63.1946 51.0668" stroke="#BDFB72" stroke-width="2.73267"/>
+            </svg>
             <span>Generating mesh...</span>
           </div>
         {/if}
@@ -2682,6 +2754,7 @@
     z-index: 1;
     pointer-events: none;
     background: transparent;
+    will-change: left, top, width, height; /* GPU hint for smooth animations */
   }
   
   .image-node-overlay {
@@ -2852,6 +2925,7 @@
     z-index: 1;
     pointer-events: none;
     background: transparent;
+    will-change: left, top, width, height; /* GPU hint for smooth animations */
   }
   
   .model-node-overlay {
@@ -2880,7 +2954,7 @@
   
   .model-node-overlay.running {
     border-color: transparent;
-    box-shadow: 0 0 0 1px #3b82f6, 0 0 12px rgba(59, 130, 246, 0.4), 0 2px 8px rgba(0, 0, 0, 0.15);
+    box-shadow: 0 0 0 1px #9E9EA0, 0 0 0 2px rgba(158, 158, 160, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15);
   }
   
   .model-node-overlay.error {
@@ -2960,7 +3034,7 @@
   }
   
   .model-status-indicator.running {
-    background: rgba(59, 130, 246, 0.3);
+    background: transparent; /* No overlay - just show the loader */
   }
   
   .model-status-indicator.error {
@@ -2984,6 +3058,17 @@
     border-top-color: white;
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
+  }
+  
+  /* Volt loader - custom loading spinner */
+  .volt-loader {
+    width: 80px;
+    height: 80px;
+    animation: spin 1.2s linear infinite;
+  }
+  
+  .volt-arc {
+    stroke: #BDFB72;
   }
   
   @keyframes spin {
@@ -3135,7 +3220,7 @@
   
   .mesh-node-overlay.selected {
     border-color: transparent;
-    box-shadow: 0 0 0 1px #4da6ff, 0 0 0 2px rgba(77, 166, 255, 0.2);
+    box-shadow: 0 0 0 1px #9E9EA0, 0 0 0 2px rgba(158, 158, 160, 0.2);
   }
   
   .mesh-node-overlay.error {
