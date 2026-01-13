@@ -6,6 +6,7 @@
 import type { NodeInstance, Edge, Camera } from '../graph/types';
 import { getNodeColor, nodeRegistry } from '../graph/nodes/registry';
 import { getPortPositions, getPortPosition, getBezierControlPoints, PORT_HANDLE_RADIUS } from './ports';
+import { getCanvasNodeRadius, getCanvasBorderWidth } from './node-style';
 
 // Theme colors interface
 interface ThemeColors {
@@ -56,6 +57,9 @@ export class Canvas2DRenderer {
   private height = 0;
   private dpr = 1;
   private theme: ThemeColors = lightTheme;
+  
+  // Current zoom level (updated each render)
+  private currentZoom = 1;
   
   // Image cache for dropped images
   private imageCache = new Map<string, HTMLImageElement>();
@@ -125,6 +129,9 @@ export class Canvas2DRenderer {
     selectedIds: Set<string>
   ) {
     if (!this.ctx) return;
+    
+    // Store current zoom for use in drawing methods
+    this.currentZoom = camera.zoom;
     
     const ctx = this.ctx;
     const w = this.width * this.dpr;
@@ -204,7 +211,7 @@ export class Canvas2DRenderer {
   private drawNode(ctx: CanvasRenderingContext2D, node: NodeInstance, selected: boolean, hovered: boolean = false) {
     const { x, y, width, height, type, status, id } = node;
     const [r, g, b] = getNodeColor(type);
-    const radius = 12;
+    const radius = getCanvasNodeRadius(this.currentZoom);
     
     // Calculate opacity for fade-in animation
     let opacity = 1;
@@ -255,9 +262,10 @@ export class Canvas2DRenderer {
       }
     }
     
-    // Draw border
+    // Draw border (width scales with zoom above 100%)
+    const borderWidth = getCanvasBorderWidth(this.currentZoom, selected, hovered);
     ctx.strokeStyle = selected ? '#ffffff' : hovered ? 'rgba(255, 255, 255, 0.5)' : 'rgba(255, 255, 255, 0.15)';
-    ctx.lineWidth = selected ? 2.5 : hovered ? 1.5 : 1;
+    ctx.lineWidth = borderWidth;
     this.roundRect(ctx, x, y, width, height, radius);
     ctx.stroke();
     
@@ -266,7 +274,7 @@ export class Canvas2DRenderer {
       ctx.shadowColor = 'rgba(255, 255, 255, 0.5)';
       ctx.shadowBlur = 15;
       ctx.strokeStyle = '#ffffff';
-      ctx.lineWidth = 2.5;
+      ctx.lineWidth = borderWidth;
       this.roundRect(ctx, x, y, width, height, radius);
       ctx.stroke();
       ctx.shadowBlur = 0;

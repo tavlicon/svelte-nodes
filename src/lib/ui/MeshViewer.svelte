@@ -10,13 +10,19 @@
     width = 200,
     height = 200,
     autoRotate = true,
-    backgroundColor = 0x1a1a1f,
+    backgroundColor = 0xeeeeee,
+    rotationX = 0,
+    rotationY = 0,
+    rotationZ = 0,
   }: {
     meshUrl?: string;
     width?: number;
     height?: number;
     autoRotate?: boolean;
     backgroundColor?: number;
+    rotationX?: number;
+    rotationY?: number;
+    rotationZ?: number;
   } = $props();
   
   // Container ref
@@ -78,8 +84,8 @@
     backLight.position.set(-5, 3, -5);
     scene.add(backLight);
     
-    // Add a subtle grid for reference
-    const gridHelper = new THREE.GridHelper(2, 10, 0x444444, 0x333333);
+    // Add a subtle grid for reference (lighter colors for light background)
+    const gridHelper = new THREE.GridHelper(2, 10, 0xcccccc, 0xdddddd);
     gridHelper.position.y = -0.5;
     scene.add(gridHelper);
     
@@ -137,6 +143,11 @@
       const maxDim = Math.max(size.x, size.y, size.z);
       const scale = 1.5 / maxDim;
       mesh.scale.setScalar(scale);
+      
+      // Apply user-specified rotation (in degrees, convert to radians)
+      mesh.rotation.x = THREE.MathUtils.degToRad(rotationX);
+      mesh.rotation.y = THREE.MathUtils.degToRad(rotationY);
+      mesh.rotation.z = THREE.MathUtils.degToRad(rotationZ);
       
       // Add to scene
       scene.add(mesh);
@@ -207,6 +218,15 @@
     }
   });
   
+  // Watch for rotation changes
+  $effect(() => {
+    if (mesh && isInitialized) {
+      mesh.rotation.x = THREE.MathUtils.degToRad(rotationX);
+      mesh.rotation.y = THREE.MathUtils.degToRad(rotationY);
+      mesh.rotation.z = THREE.MathUtils.degToRad(rotationZ);
+    }
+  });
+  
   // Cleanup on destroy
   onDestroy(() => {
     cleanup();
@@ -254,7 +274,7 @@
     position: relative;
     border-radius: var(--radius-md, 8px);
     overflow: hidden;
-    background: #1a1a1f;
+    background: #eeeeee;
   }
   
   .mesh-viewer :global(canvas) {
@@ -272,15 +292,15 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    background: rgba(26, 26, 31, 0.9);
-    color: rgba(255, 255, 255, 0.6);
+    background: rgba(238, 238, 238, 0.9);
+    color: rgba(0, 0, 0, 0.5);
     font-size: 12px;
   }
   
   .spinner {
     width: 24px;
     height: 24px;
-    border: 2px solid rgba(255, 255, 255, 0.2);
+    border: 2px solid rgba(0, 0, 0, 0.1);
     border-top-color: var(--accent-primary, #6366f1);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;

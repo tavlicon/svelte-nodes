@@ -18,6 +18,7 @@
   } from '../canvas/ports';
   import { arePortsCompatible } from '../graph/types';
   import { generateGLBThumbnail } from './glb-thumbnail';
+  import { getDOMNodeRadius, getDOMBorderWidth, MIN_ZOOM, MAX_ZOOM } from '../canvas/node-style';
   
   // Renderer interface
   interface IRenderer {
@@ -331,10 +332,10 @@
     const contentWidth = (maxX - minX) + padding * 2;
     const contentHeight = (maxY - minY) + padding * 2;
     
-    // Calculate zoom to fit content (cap between 0.1 and 1.5 for comfortable viewing)
+    // Calculate zoom to fit content (cap between MIN_ZOOM and 1.5 for comfortable viewing)
     const zoomX = viewportWidth / contentWidth;
     const zoomY = viewportHeight / contentHeight;
-    const finalZoom = Math.max(0.1, Math.min(zoomX, zoomY, 1.5));
+    const finalZoom = Math.max(MIN_ZOOM, Math.min(zoomX, zoomY, 1.5));
     
     // For top-left anchored coordinates: screenX = (worldX + camX) * zoom
     // To center content: the content's center should appear at viewport center
@@ -461,7 +462,7 @@
     if (e.key === '-' && (e.metaKey || e.ctrlKey) && !isInInput) {
       e.preventDefault();
       e.stopPropagation();
-      graphStore.setCamera({ zoom: Math.max(0.1, graphStore.camera.zoom * 0.8) });
+      graphStore.setCamera({ zoom: Math.max(MIN_ZOOM, graphStore.camera.zoom * 0.8) });
       return;
     }
     
@@ -749,7 +750,7 @@
       const dx = currentCenter.x - lastPinchCenter.x;
       const dy = currentCenter.y - lastPinchCenter.y;
       const zoomFactor = currentDistance / lastPinchDistance;
-      const newZoom = Math.max(0.1, Math.min(5, graphStore.camera.zoom * zoomFactor));
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, graphStore.camera.zoom * zoomFactor));
       
       graphStore.setCamera({
         x: graphStore.camera.x + dx / graphStore.camera.zoom,
@@ -994,7 +995,7 @@
     const zoomIntensity = e.ctrlKey ? 0.01 : 0.002;
     const zoomDelta = -e.deltaY * zoomIntensity;
     const zoomFactor = Math.exp(zoomDelta);
-    const newZoom = Math.max(0.1, Math.min(5, graphStore.camera.zoom * zoomFactor));
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, graphStore.camera.zoom * zoomFactor));
     
     // Zoom towards mouse (top-left anchored)
     // The point under the mouse should stay fixed during zoom
@@ -1528,7 +1529,8 @@
       y: topLeft.y,
       width: bottomRight.x - topLeft.x,
       height: bottomRight.y - topLeft.y,
-      borderRadius: 12 * graphStore.camera.zoom,
+      borderRadius: getDOMNodeRadius(graphStore.camera.zoom),
+      borderWidth: getDOMBorderWidth(graphStore.camera.zoom, true, false),
     };
   });
   
@@ -1569,6 +1571,7 @@
     screenWidth: number;
     screenHeight: number;
     borderRadius: number;
+    borderWidth: number;
     isNew: boolean;
     isSelected: boolean;
     isHovered: boolean;
@@ -1598,6 +1601,7 @@
     screenWidth: number;
     screenHeight: number;
     borderRadius: number;
+    borderWidth: number;
     isNew: boolean;
     isSelected: boolean;
     isHovered: boolean;
@@ -1616,6 +1620,7 @@
     screenWidth: number;
     screenHeight: number;
     borderRadius: number;
+    borderWidth: number;
     isNew: boolean;
     isSelected: boolean;
     isHovered: boolean;
@@ -1637,6 +1642,7 @@
     screenWidth: number;
     screenHeight: number;
     borderRadius: number;
+    borderWidth: number;
     isNew: boolean;
     isSelected: boolean;
     isHovered: boolean;
@@ -1690,7 +1696,8 @@
           screenY: topLeft.y,
           screenWidth: bottomRight.x - topLeft.x,
           screenHeight: bottomRight.y - topLeft.y,
-          borderRadius: 12 * cam.zoom,
+          borderRadius: getDOMNodeRadius(cam.zoom),
+          borderWidth: getDOMBorderWidth(cam.zoom, graphStore.selectedNodeIds.has(node.id), hoveredNodeId === node.id),
           isNew: newlyAddedNodeIds.has(node.id),
           isSelected: graphStore.selectedNodeIds.has(node.id),
           isHovered: hoveredNodeId === node.id,
@@ -1740,7 +1747,8 @@
           screenY: topLeft.y,
           screenWidth: bottomRight.x - topLeft.x,
           screenHeight: bottomRight.y - topLeft.y,
-          borderRadius: 12 * cam.zoom,
+          borderRadius: getDOMNodeRadius(cam.zoom),
+          borderWidth: getDOMBorderWidth(cam.zoom, graphStore.selectedNodeIds.has(node.id), hoveredNodeId === node.id),
           isNew: newlyAddedNodeIds.has(node.id),
           isSelected: graphStore.selectedNodeIds.has(node.id),
           isHovered: hoveredNodeId === node.id,
@@ -1772,7 +1780,8 @@
           screenY: topLeft.y,
           screenWidth: bottomRight.x - topLeft.x,
           screenHeight: bottomRight.y - topLeft.y,
-          borderRadius: 12 * cam.zoom,
+          borderRadius: getDOMNodeRadius(cam.zoom),
+          borderWidth: getDOMBorderWidth(cam.zoom, graphStore.selectedNodeIds.has(node.id), hoveredNodeId === node.id),
           isNew: newlyAddedNodeIds.has(node.id),
           isSelected: graphStore.selectedNodeIds.has(node.id),
           isHovered: hoveredNodeId === node.id,
@@ -1796,20 +1805,27 @@
         const outputPath = node.params.outputPath as string;
         const filename = outputPath ? outputPath.split('/').pop() || '3D Output' : '3D Output';
         const meshUrl = (node.params.meshUrl) as string || '';
+        const rotationX = (node.params.rotationX as number) ?? 0;
+        const rotationY = (node.params.rotationY as number) ?? 0;
+        const rotationZ = (node.params.rotationZ as number) ?? 0;
+        
+        // Cache key includes rotation so thumbnails update when rotation changes
+        const cacheKey = `${meshUrl}|rx:${rotationX}|ry:${rotationY}|rz:${rotationZ}`;
         
         return {
           id: node.id,
           meshUrl,
           videoUrl: (node.params.videoUrl) as string || '',
           previewUrl: (node.thumbnailUrl || node.params.previewUrl) as string || '',
-          thumbnailUrl: glbThumbnailCache.get(meshUrl) || '', // Use cached thumbnail
+          thumbnailUrl: glbThumbnailCache.get(cacheKey) || '', // Use cached thumbnail with rotation
           outputPath,
           filename,
           screenX: topLeft.x,
           screenY: topLeft.y,
           screenWidth: bottomRight.x - topLeft.x,
           screenHeight: bottomRight.y - topLeft.y,
-          borderRadius: 12 * cam.zoom,
+          borderRadius: getDOMNodeRadius(cam.zoom),
+          borderWidth: getDOMBorderWidth(cam.zoom, graphStore.selectedNodeIds.has(node.id), hoveredNodeId === node.id),
           isNew: newlyAddedNodeIds.has(node.id),
           isSelected: graphStore.selectedNodeIds.has(node.id),
           isHovered: hoveredNodeId === node.id,
@@ -1829,22 +1845,34 @@
     for (const node of meshNodes) {
       const meshUrl = (node.params.meshUrl) as string || '';
       const videoUrl = (node.params.videoUrl) as string || '';
+      const rotationX = (node.params.rotationX as number) ?? 0;
+      const rotationY = (node.params.rotationY as number) ?? 0;
+      const rotationZ = (node.params.rotationZ as number) ?? 0;
+      
+      // Include rotation in cache key so thumbnails regenerate when rotation changes
+      const cacheKey = `${meshUrl}|rx:${rotationX}|ry:${rotationY}|rz:${rotationZ}`;
       
       // Generate thumbnail if we have a mesh URL but no video and no cached thumbnail
-      if (meshUrl && !videoUrl && !glbThumbnailCache.has(meshUrl)) {
+      if (meshUrl && !videoUrl && !glbThumbnailCache.has(cacheKey)) {
         // Set a placeholder to prevent multiple generations
-        glbThumbnailCache.set(meshUrl, 'loading');
+        glbThumbnailCache.set(cacheKey, 'loading');
         
-        // Generate thumbnail asynchronously
-        generateGLBThumbnail(meshUrl, { width: 256, height: 256 })
+        // Generate thumbnail asynchronously with rotation
+        generateGLBThumbnail(meshUrl, { 
+          width: 256, 
+          height: 256,
+          rotationX,
+          rotationY,
+          rotationZ,
+        })
           .then(dataUrl => {
-            glbThumbnailCache = new Map(glbThumbnailCache).set(meshUrl, dataUrl);
+            glbThumbnailCache = new Map(glbThumbnailCache).set(cacheKey, dataUrl);
           })
           .catch(err => {
             console.error('Failed to generate GLB thumbnail:', err);
             // Remove the loading placeholder on error
             const newCache = new Map(glbThumbnailCache);
-            newCache.delete(meshUrl);
+            newCache.delete(cacheKey);
             glbThumbnailCache = newCache;
           });
       }
@@ -2075,7 +2103,7 @@
         class:empty={!img.imageUrl}
         class:selected={img.isSelected}
         class:error={img.status === 'error'}
-        style={`width: ${img.screenWidth}px; height: ${img.screenHeight}px; border-radius: ${img.borderRadius}px;`}
+        style={`width: ${img.screenWidth}px; height: ${img.screenHeight}px; border-radius: ${img.borderRadius}px; ${img.isSelected || img.isHovered ? `border-width: ${img.borderWidth}px;` : ''}`}
       >
         {#if img.imageUrl}
           <img 
@@ -2087,22 +2115,6 @@
           {#if img.isHovered && !img.isSelected}
             <div class="image-hover-overlay"></div>
           {/if}
-          <!-- Connector icon - replaces port, positioned at right edge -->
-          <div 
-            class="node-connector-icon" 
-            class:visible={img.isHovered}
-            class:dragging={isConnecting && connectionStart?.nodeId === img.id}
-            onpointerdown={(e) => handleConnectorMouseDown(e, img.id, 'image')}
-            onmouseenter={() => handleConnectorMouseEnter(img.id)}
-            onmouseleave={handleConnectorMouseLeave}
-            role="button"
-            tabindex="-1"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 8v8M8 12h8" />
-            </svg>
-          </div>
         {:else}
           <div class="image-placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -2117,6 +2129,25 @@
           <div class="node-error-badge" title={img.error || 'Error'}>!</div>
         {/if}
       </div>
+      <!-- Connector icon - positioned outside overlay to avoid overflow:hidden clipping -->
+      {#if img.imageUrl}
+        <div 
+          class="node-connector-icon" 
+          class:visible={img.isHovered}
+          class:dragging={isConnecting && connectionStart?.nodeId === img.id}
+          style={`height: ${img.screenHeight}px;`}
+          onpointerdown={(e) => handleConnectorMouseDown(e, img.id, 'image')}
+          onmouseenter={() => handleConnectorMouseEnter(img.id)}
+          onmouseleave={handleConnectorMouseLeave}
+          role="button"
+          tabindex="-1"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8v8M8 12h8" />
+          </svg>
+        </div>
+      {/if}
       <!-- Error tooltip for image node -->
       {#if img.status === 'error' && img.error && img.isHovered}
         <div class="node-error-tooltip" style={`max-width: ${Math.max(img.screenWidth, 200)}px;`}>
@@ -2144,7 +2175,7 @@
         class:running={model.status === 'running'}
         class:error={model.status === 'error'}
         class:complete={model.status === 'complete'}
-        style={`width: ${model.screenWidth}px; height: ${model.screenHeight}px; border-radius: ${model.borderRadius}px;`}
+        style={`width: ${model.screenWidth}px; height: ${model.screenHeight}px; border-radius: ${model.borderRadius}px; ${model.isSelected || model.isHovered ? `border-width: ${model.borderWidth}px;` : ''}`}
     >
         {#if model.status === 'running'}
           <div class="model-status-indicator running">
@@ -2211,7 +2242,7 @@
         class:empty={!output.imageUrl}
         class:selected={output.isSelected}
         class:error={output.status === 'error'}
-        style={`width: ${output.screenWidth}px; height: ${output.screenHeight}px; border-radius: ${output.borderRadius}px;`}
+        style={`width: ${output.screenWidth}px; height: ${output.screenHeight}px; border-radius: ${output.borderRadius}px; ${output.isSelected || output.isHovered ? `border-width: ${output.borderWidth}px;` : ''}`}
       >
         {#if output.imageUrl}
           <img 
@@ -2223,22 +2254,6 @@
           {#if output.isHovered && !output.isSelected}
             <div class="image-hover-overlay"></div>
           {/if}
-          <!-- Connector icon - replaces port, positioned at right edge -->
-          <div 
-            class="node-connector-icon" 
-            class:visible={output.isHovered}
-            class:dragging={isConnecting && connectionStart?.nodeId === output.id}
-            onpointerdown={(e) => handleConnectorMouseDown(e, output.id, 'image')}
-            onmouseenter={() => handleConnectorMouseEnter(output.id)}
-            onmouseleave={handleConnectorMouseLeave}
-            role="button"
-            tabindex="-1"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 8v8M8 12h8" />
-            </svg>
-          </div>
         {:else}
           <div class="output-placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -2252,6 +2267,25 @@
           <div class="node-error-badge" title={output.error || 'Error'}>!</div>
         {/if}
       </div>
+      <!-- Connector icon - positioned outside overlay to avoid overflow:hidden clipping -->
+      {#if output.imageUrl}
+        <div 
+          class="node-connector-icon" 
+          class:visible={output.isHovered}
+          class:dragging={isConnecting && connectionStart?.nodeId === output.id}
+          style={`height: ${output.screenHeight}px;`}
+          onpointerdown={(e) => handleConnectorMouseDown(e, output.id, 'image')}
+          onmouseenter={() => handleConnectorMouseEnter(output.id)}
+          onmouseleave={handleConnectorMouseLeave}
+          role="button"
+          tabindex="-1"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8v8M8 12h8" />
+          </svg>
+        </div>
+      {/if}
       <!-- Error tooltip for output node -->
       {#if output.status === 'error' && output.error && output.isHovered}
         <div class="node-error-tooltip" style={`max-width: ${Math.max(output.screenWidth, 200)}px;`}>
@@ -2278,7 +2312,7 @@
         class:empty={!meshNode.meshUrl && !meshNode.previewUrl}
         class:selected={meshNode.isSelected}
         class:error={meshNode.status === 'error'}
-        style={`width: ${meshNode.screenWidth}px; height: ${meshNode.screenHeight}px; border-radius: ${meshNode.borderRadius}px;`}
+        style={`width: ${meshNode.screenWidth}px; height: ${meshNode.screenHeight}px; border-radius: ${meshNode.borderRadius}px; ${meshNode.isSelected || meshNode.isHovered ? `border-width: ${meshNode.borderWidth}px;` : ''}`}
       >
         {#if meshNode.videoUrl}
           <!-- Video preview (turntable render) - only if explicitly generated -->
@@ -2297,22 +2331,6 @@
           {#if meshNode.isHovered && !meshNode.isSelected}
             <div class="image-hover-overlay"></div>
           {/if}
-          <!-- Connector icon for mesh output -->
-          <div 
-            class="node-connector-icon" 
-            class:visible={meshNode.isHovered}
-            class:dragging={isConnecting && connectionStart?.nodeId === meshNode.id}
-            onpointerdown={(e) => handleConnectorMouseDown(e, meshNode.id, 'mesh')}
-            onmouseenter={() => handleConnectorMouseEnter(meshNode.id)}
-            onmouseleave={handleConnectorMouseLeave}
-            role="button"
-            tabindex="-1"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 8v8M8 12h8" />
-            </svg>
-          </div>
         {:else if meshNode.thumbnailUrl && meshNode.thumbnailUrl !== 'loading'}
           <!-- GLB thumbnail (generated client-side using Three.js) -->
           <img 
@@ -2326,22 +2344,6 @@
           {#if meshNode.isHovered && !meshNode.isSelected}
             <div class="image-hover-overlay"></div>
           {/if}
-          <!-- Connector icon for mesh output -->
-          <div 
-            class="node-connector-icon" 
-            class:visible={meshNode.isHovered}
-            class:dragging={isConnecting && connectionStart?.nodeId === meshNode.id}
-            onpointerdown={(e) => handleConnectorMouseDown(e, meshNode.id, 'mesh')}
-            onmouseenter={() => handleConnectorMouseEnter(meshNode.id)}
-            onmouseleave={handleConnectorMouseLeave}
-            role="button"
-            tabindex="-1"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 8v8M8 12h8" />
-            </svg>
-          </div>
         {:else if meshNode.thumbnailUrl === 'loading'}
           <!-- Loading state while generating thumbnail -->
           <div class="mesh-placeholder">
@@ -2363,22 +2365,6 @@
           {#if meshNode.isHovered && !meshNode.isSelected}
             <div class="image-hover-overlay"></div>
           {/if}
-          <!-- Connector icon for mesh output -->
-          <div 
-            class="node-connector-icon" 
-            class:visible={meshNode.isHovered}
-            class:dragging={isConnecting && connectionStart?.nodeId === meshNode.id}
-            onpointerdown={(e) => handleConnectorMouseDown(e, meshNode.id, 'mesh')}
-            onmouseenter={() => handleConnectorMouseEnter(meshNode.id)}
-            onmouseleave={handleConnectorMouseLeave}
-            role="button"
-            tabindex="-1"
-          >
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-              <circle cx="12" cy="12" r="9" />
-              <path d="M12 8v8M8 12h8" />
-            </svg>
-          </div>
         {:else}
           <div class="mesh-placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -2399,6 +2385,25 @@
           <div class="node-error-badge" title={meshNode.error || 'Error'}>!</div>
         {/if}
       </div>
+      <!-- Connector icon - positioned outside overlay to avoid overflow:hidden clipping -->
+      {#if meshNode.videoUrl || meshNode.thumbnailUrl || meshNode.previewUrl}
+        <div 
+          class="node-connector-icon" 
+          class:visible={meshNode.isHovered}
+          class:dragging={isConnecting && connectionStart?.nodeId === meshNode.id}
+          style={`height: ${meshNode.screenHeight}px;`}
+          onpointerdown={(e) => handleConnectorMouseDown(e, meshNode.id, 'mesh')}
+          onmouseenter={() => handleConnectorMouseEnter(meshNode.id)}
+          onmouseleave={handleConnectorMouseLeave}
+          role="button"
+          tabindex="-1"
+        >
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8v8M8 12h8" />
+          </svg>
+        </div>
+      {/if}
       <!-- Error tooltip for mesh node -->
       {#if meshNode.status === 'error' && meshNode.error && meshNode.isHovered}
         <div class="node-error-tooltip" style={`max-width: ${Math.max(meshNode.screenWidth, 200)}px;`}>
@@ -2469,7 +2474,7 @@
   {#if selectionBounds}
     <div
       class="selection-bounds"
-      style={`left: ${selectionBounds.x}px; top: ${selectionBounds.y}px; width: ${selectionBounds.width}px; height: ${selectionBounds.height}px; border-radius: ${selectionBounds.borderRadius || 12}px;`}
+      style={`left: ${selectionBounds.x}px; top: ${selectionBounds.y}px; width: ${selectionBounds.width}px; height: ${selectionBounds.height}px; border-radius: ${selectionBounds.borderRadius}px; border-width: ${selectionBounds.borderWidth}px;`}
     ></div>
   {/if}
   
@@ -2662,8 +2667,8 @@
   
   .image-node-overlay {
     position: relative;
-    border-radius: 12px;
-    overflow: visible; /* Allow connector icon to show outside bounds */
+    /* border-radius set via inline style for dynamic zoom scaling */
+    overflow: hidden; /* Clip image to border-radius */
     pointer-events: none;
     background: #1a1a1e;
     user-select: none;
@@ -2672,10 +2677,10 @@
     border: 1px solid transparent;
   }
   
-  /* Selected state - Figma border (slightly thicker for visibility) */
+  /* Selected state - use box-shadow instead of border to avoid corner gaps */
   .image-node-overlay.selected {
-    border: 1px solid #9E9EA0;
-    box-shadow: 0 0 0 0.5px rgba(158, 158, 160, 0.3);
+    border-color: transparent;
+    box-shadow: 0 0 0 1px #9E9EA0, 0 0 0 2px rgba(158, 158, 160, 0.2);
   }
   
   /* Error state for image nodes */
@@ -2711,7 +2716,7 @@
     user-select: none;
     -webkit-user-select: none;
     -webkit-user-drag: none;
-    border-radius: 11px; /* Slightly less than parent to account for border */
+    border-radius: inherit; /* Inherit from parent container */
     pointer-events: none;
   }
   
@@ -2729,10 +2734,10 @@
   .node-connector-icon {
     position: absolute;
     right: -26px;
-    top: 50%;
-    transform: translateY(-50%) translateX(-6px);
+    top: 0;
+    transform: translateX(-6px);
     width: 24px;
-    height: 24px;
+    /* height set via inline style to match node height */
     display: flex;
     align-items: center;
     justify-content: center;
@@ -2745,7 +2750,7 @@
   
   .node-connector-icon.visible {
     opacity: 1;
-    transform: translateY(-50%) translateX(0);
+    transform: translateX(0);
     pointer-events: auto;
   }
   
@@ -2832,8 +2837,8 @@
   
   .model-node-overlay {
     position: relative;
-    border-radius: 12px;
-    overflow: visible;
+    /* border-radius set via inline style for dynamic zoom scaling */
+    overflow: hidden; /* Clip content to border-radius */
     pointer-events: none;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
     background: linear-gradient(270deg, #373534 0%, #424140 100%);
@@ -2850,22 +2855,24 @@
   }
   
   .model-node-overlay.selected {
-    border-color: #9E9EA0;
+    border-color: transparent;
+    box-shadow: 0 0 0 1px #9E9EA0, 0 0 0 2px rgba(158, 158, 160, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15);
   }
   
   .model-node-overlay.running {
-    border-color: #3b82f6;
-    box-shadow: 0 0 12px rgba(59, 130, 246, 0.4);
+    border-color: transparent;
+    box-shadow: 0 0 0 1px #3b82f6, 0 0 12px rgba(59, 130, 246, 0.4), 0 2px 8px rgba(0, 0, 0, 0.15);
   }
   
   .model-node-overlay.error {
-    border-color: #ef4444;
-    box-shadow: 0 0 12px rgba(239, 68, 68, 0.4);
+    border-color: transparent;
+    box-shadow: 0 0 0 1px #ef4444, 0 0 12px rgba(239, 68, 68, 0.4), 0 2px 8px rgba(0, 0, 0, 0.15);
     background: linear-gradient(270deg, #4a2020 0%, #5c2828 100%);
   }
   
   .model-node-overlay.complete {
-    border-color: #22c55e;
+    border-color: transparent;
+    box-shadow: 0 0 0 1px #22c55e, 0 0 0 2px rgba(34, 197, 94, 0.2), 0 2px 8px rgba(0, 0, 0, 0.15);
   }
   
   /* Model metadata content - Kode Mono styling */
@@ -3028,8 +3035,8 @@
   /* Output node overlay - shows generated images */
   .output-node-overlay {
     position: relative;
-    border-radius: 12px;
-    overflow: visible; /* Allow connector icon to show outside bounds */
+    /* border-radius set via inline style for dynamic zoom scaling */
+    overflow: hidden; /* Clip image to border-radius */
     pointer-events: none;
     background: #1a1a1e;
     user-select: none;
@@ -3038,9 +3045,10 @@
     border: 0.509px solid transparent;
   }
   
-  /* Selected state - Figma border */
+  /* Selected state - use box-shadow instead of border to avoid corner gaps */
   .output-node-overlay.selected {
-    border: 1px solid #9E9EA0;
+    border-color: transparent;
+    box-shadow: 0 0 0 1px #9E9EA0, 0 0 0 2px rgba(158, 158, 160, 0.2);
   }
   
   /* Error state for output nodes */
@@ -3058,7 +3066,7 @@
     -webkit-user-select: none;
     -webkit-user-drag: none;
     pointer-events: none;
-    border-radius: 11px; /* Match parent's border-radius minus border */
+    border-radius: inherit; /* Inherit from parent container */
   }
   
   .output-node-overlay.empty {
@@ -3096,8 +3104,8 @@
   /* Mesh output node overlay (3D meshes) */
   .mesh-node-overlay {
     position: relative;
-    border-radius: 12px;
-    overflow: visible;
+    /* border-radius set via inline style for dynamic zoom scaling */
+    overflow: hidden; /* Clip content to border-radius */
     pointer-events: none;
     background: linear-gradient(135deg, #1a2a3f 0%, #1a1a2f 100%);
     user-select: none;
@@ -3107,7 +3115,8 @@
   }
   
   .mesh-node-overlay.selected {
-    border: 1px solid #4da6ff;
+    border-color: transparent;
+    box-shadow: 0 0 0 1px #4da6ff, 0 0 0 2px rgba(77, 166, 255, 0.2);
   }
   
   .mesh-node-overlay.error {

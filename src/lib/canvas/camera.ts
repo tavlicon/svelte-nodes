@@ -3,6 +3,8 @@
  * Handles pan, zoom, and coordinate transformations
  */
 
+import { MIN_ZOOM, MAX_ZOOM } from './node-style';
+
 export interface CameraState {
   x: number;
   y: number;
@@ -14,9 +16,9 @@ export class Camera {
   private _y = 0;
   private _zoom = 1;
   
-  // Limits
-  private minZoom = 0.1;
-  private maxZoom = 5;
+  // Limits (from centralized node-style.ts)
+  private minZoom = MIN_ZOOM;
+  private maxZoom = MAX_ZOOM;
   
   // Viewport dimensions
   private viewportWidth = 0;

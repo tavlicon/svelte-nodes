@@ -151,9 +151,64 @@
               width={272}
               height={200}
               autoRotate={true}
+              rotationX={selectedNode.params.rotationX as number ?? 0}
+              rotationY={selectedNode.params.rotationY as number ?? 0}
+              rotationZ={selectedNode.params.rotationZ as number ?? 0}
             />
           </div>
           {#if selectedNode.params.meshUrl}
+            <!-- Orientation Controls -->
+            <div class="orientation-controls">
+              <h4 class="control-title">Orientation Fine-Tuning</h4>
+              <div class="rotation-row">
+                <label class="rotation-label">
+                  <span>X</span>
+                  <input 
+                    type="range" 
+                    min="-180" 
+                    max="180" 
+                    step="15"
+                    value={selectedNode.params.rotationX ?? 0}
+                    oninput={(e) => graphStore.updateNode(selectedNode!.id, { params: { ...selectedNode!.params, rotationX: Number((e.target as HTMLInputElement).value) } })}
+                  />
+                  <span class="rotation-value">{selectedNode.params.rotationX ?? 0}°</span>
+                </label>
+              </div>
+              <div class="rotation-row">
+                <label class="rotation-label">
+                  <span>Y</span>
+                  <input 
+                    type="range" 
+                    min="-180" 
+                    max="180" 
+                    step="15"
+                    value={selectedNode.params.rotationY ?? 0}
+                    oninput={(e) => graphStore.updateNode(selectedNode!.id, { params: { ...selectedNode!.params, rotationY: Number((e.target as HTMLInputElement).value) } })}
+                  />
+                  <span class="rotation-value">{selectedNode.params.rotationY ?? 0}°</span>
+                </label>
+              </div>
+              <div class="rotation-row">
+                <label class="rotation-label">
+                  <span>Z</span>
+                  <input 
+                    type="range" 
+                    min="-180" 
+                    max="180" 
+                    step="15"
+                    value={selectedNode.params.rotationZ ?? 0}
+                    oninput={(e) => graphStore.updateNode(selectedNode!.id, { params: { ...selectedNode!.params, rotationZ: Number((e.target as HTMLInputElement).value) } })}
+                  />
+                  <span class="rotation-value">{selectedNode.params.rotationZ ?? 0}°</span>
+                </label>
+              </div>
+              <button 
+                class="reset-btn"
+                onclick={() => graphStore.updateNode(selectedNode!.id, { params: { ...selectedNode!.params, rotationX: 0, rotationY: 0, rotationZ: 0 } })}
+              >
+                Reset Orientation
+              </button>
+            </div>
             <a 
               class="download-btn"
               href={selectedNode.params.meshUrl as string}
@@ -542,5 +597,98 @@
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+  
+  /* Orientation Controls */
+  .orientation-controls {
+    margin-top: 12px;
+    padding: 10px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+  }
+  
+  .control-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+  }
+  
+  .rotation-row {
+    margin-bottom: 8px;
+  }
+  
+  .rotation-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  
+  .rotation-label span:first-child {
+    width: 14px;
+    font-weight: 600;
+    color: var(--text-muted);
+  }
+  
+  .rotation-label input[type="range"] {
+    flex: 1;
+    height: 4px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--bg-elevated);
+    border-radius: 2px;
+    cursor: pointer;
+  }
+  
+  .rotation-label input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 12px;
+    height: 12px;
+    background: var(--accent-primary);
+    border-radius: 50%;
+    cursor: grab;
+    transition: transform 0.1s ease;
+  }
+  
+  .rotation-label input[type="range"]::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+  }
+  
+  .rotation-label input[type="range"]::-webkit-slider-thumb:active {
+    cursor: grabbing;
+    transform: scale(1.1);
+  }
+  
+  .rotation-value {
+    width: 40px;
+    text-align: right;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-primary);
+  }
+  
+  .reset-btn {
+    width: 100%;
+    margin-top: 8px;
+    padding: 6px 10px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    font-size: 10px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  
+  .reset-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    border-color: var(--border-default);
   }
 </style>

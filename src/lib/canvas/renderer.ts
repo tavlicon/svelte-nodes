@@ -6,6 +6,7 @@
 import type { NodeInstance, Edge, Camera } from '../graph/types';
 import { getNodeColor } from '../graph/nodes/registry';
 import { getPortPosition, getBezierControlPoints } from './ports';
+import { getShaderNodeRadius } from './node-style';
 import nodesWGSL from './nodes.wgsl?raw';
 import wiresWGSL from './wires.wgsl?raw';
 import gridWGSL from './grid.wgsl?raw';
@@ -67,6 +68,7 @@ export class CanvasRenderer {
   private height = 0;
   private maxNodes = 1024;
   private maxWires = 2048;
+  private currentZoom = 1;
   
   // Theme colors (rgba)
   private clearColor = { r: 0.98, g: 0.98, b: 0.98, a: 1.0 }; // Light mode default
@@ -492,7 +494,7 @@ export class CanvasRenderer {
       data[offset + 5] = color[1];
       data[offset + 6] = color[2];
       data[offset + 7] = color[3];
-      data[offset + 8] = 12; // Border radius
+      data[offset + 8] = getShaderNodeRadius(this.currentZoom); // Border radius
       data[offset + 9] = isSelected;
       data[offset + 10] = statusCode;
       data[offset + 11] = 0; // Padding
@@ -575,6 +577,9 @@ export class CanvasRenderer {
     if (!this.device || !this.context || !this.nodePipeline || !this.wirePipeline || !this.gridPipeline) {
       return;
     }
+    
+    // Store current zoom for use in buffer updates
+    this.currentZoom = camera.zoom;
     
     // Update buffers
     this.updateCameraBuffer(camera);

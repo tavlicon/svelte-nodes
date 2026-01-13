@@ -1006,6 +1006,33 @@ async def generate_3d_mesh(
         
         mesh = meshes[0]
         
+        # Apply orientation correction: TripoSR outputs meshes in canonical pose
+        # (typically Y-up/vertical). Rotate -90° around X to lay objects flat.
+        # Users can fine-tune with the UI orientation controls.
+        # PREVIOUS: Single rotation (commented out for rollback)
+        # logger.info("🔄 Applying default orientation correction (-90° X-axis)...")
+        # rotation_matrix = trimesh.transformations.rotation_matrix(
+        #     # np.radians(-90), [1, 0, 0], point=[0, 0, 0]
+        #     # np.radians(0), [0, 1, 0], point=[0, 0, 0]
+        #     np.radians(90), [0, 0, 1], point=[0, 0, 0]
+        # )
+        # mesh.apply_transform(rotation_matrix)
+        
+        # Apply orientation correction
+        logger.info("🔄 Applying default orientation correction...")
+        
+        # First: rotate 90° around Z to lay flat on correct axis
+        rotation_z = trimesh.transformations.rotation_matrix(
+            np.radians(90), [0, 0, 1], point=[0, 0, 0]
+        )
+        mesh.apply_transform(rotation_z)
+        
+        # Second: rotate 180° around Y to face forward
+        rotation_y = trimesh.transformations.rotation_matrix(
+            np.radians(180), [0, 1, 0], point=[0, 0, 0]
+        )
+        mesh.apply_transform(rotation_y)
+        
         # Handle texture baking if requested
         if bake_texture:
             logger.info(f"🎨 Baking texture at resolution {texture_resolution}...")

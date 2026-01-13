@@ -1177,7 +1177,7 @@
     display: flex;
     flex-direction: column;
     background: transparent;
-    border-radius: 8px;
+    border-radius: 4px;
     overflow: hidden;
     /* Reset button styles */
     font: inherit;
@@ -1207,7 +1207,7 @@
     aspect-ratio: 1;
     overflow: hidden;
     background: #1c1c1f;
-    border-radius: 8px;
+    border-radius: 4px;
   }
   
   .file-thumbnail img {

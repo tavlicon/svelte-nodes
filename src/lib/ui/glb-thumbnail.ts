@@ -16,13 +16,19 @@ export interface ThumbnailOptions {
   height?: number;
   backgroundColor?: number;
   cameraPosition?: { x: number; y: number; z: number };
+  rotationX?: number; // Rotation in degrees
+  rotationY?: number;
+  rotationZ?: number;
 }
 
 const defaultOptions: Required<ThumbnailOptions> = {
   width: 256,
   height: 256,
-  backgroundColor: 0x1a1a1f, // Dark background matching MeshViewer
+  backgroundColor: 0xeeeeee, // Light gray background matching MeshViewer
   cameraPosition: { x: 2, y: 1.5, z: 2 },
+  rotationX: 0,
+  rotationY: 0,
+  rotationZ: 0,
 };
 
 /**
@@ -76,8 +82,8 @@ export async function generateGLBThumbnail(
   backLight.position.set(-5, 3, -5);
   scene.add(backLight);
 
-  // Add grid (matching MeshViewer)
-  const gridHelper = new THREE.GridHelper(2, 10, 0x444444, 0x333333);
+  // Add grid (matching MeshViewer - lighter colors for light background)
+  const gridHelper = new THREE.GridHelper(2, 10, 0xcccccc, 0xdddddd);
   gridHelper.position.y = -0.5;
   scene.add(gridHelper);
 
@@ -97,6 +103,11 @@ export async function generateGLBThumbnail(
     const maxDim = Math.max(size.x, size.y, size.z);
     const scale = 1.5 / maxDim;
     mesh.scale.setScalar(scale);
+
+    // Apply rotation (in degrees, convert to radians)
+    mesh.rotation.x = THREE.MathUtils.degToRad(opts.rotationX);
+    mesh.rotation.y = THREE.MathUtils.degToRad(opts.rotationY);
+    mesh.rotation.z = THREE.MathUtils.degToRad(opts.rotationZ);
 
     scene.add(mesh);
 

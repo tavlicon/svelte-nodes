@@ -3,6 +3,7 @@
   import { nodeRegistry } from '../graph/nodes/registry';
   import { inferenceManager } from '../inference/manager';
   import { executionEngine } from '../orchestration/execution';
+  import { MIN_ZOOM } from '../canvas/node-style';
   
   let showNodeMenu = $state(false);
   let showZoomMenu = $state(false);
@@ -129,7 +130,7 @@
   }
   
   function handleZoomOut() {
-    graphStore.setCamera({ zoom: Math.max(0.1, graphStore.camera.zoom * 0.8) });
+    graphStore.setCamera({ zoom: Math.max(MIN_ZOOM, graphStore.camera.zoom * 0.8) });
     showZoomMenu = false;
   }
   
@@ -164,7 +165,7 @@
     // Calculate zoom to fit (cap for comfortable viewing)
     const zoomX = viewportWidth / contentWidth;
     const zoomY = viewportHeight / contentHeight;
-    const finalZoom = Math.max(0.1, Math.min(zoomX, zoomY, 1.5));
+    const finalZoom = Math.max(MIN_ZOOM, Math.min(zoomX, zoomY, 1.5));
     
     // For top-left anchored: screenX = (worldX + camX) * zoom
     // Content center should appear at viewport center
