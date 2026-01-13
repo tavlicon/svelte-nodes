@@ -14,6 +14,9 @@
     rotationX = 0,
     rotationY = 0,
     rotationZ = 0,
+    showLoading = true, // Whether to show loading overlay
+    paused = false, // Whether to pause auto-rotation
+    visible = true, // Whether the viewer is currently visible (controls animation)
   }: {
     meshUrl?: string;
     width?: number;
@@ -23,6 +26,9 @@
     rotationX?: number;
     rotationY?: number;
     rotationZ?: number;
+    showLoading?: boolean;
+    paused?: boolean;
+    visible?: boolean;
   } = $props();
   
   // Container ref
@@ -40,6 +46,9 @@
   // Loading state
   let isLoading = $state(false);
   let error = $state<string | null>(null);
+  let loadedMeshUrl = ''; // Track which URL is currently loaded to prevent reloading
+  let frameCount = 0; // Count frames after mesh load for seamless thumbnail transition
+  const FRAMES_BEFORE_AUTOROTATE = 3; // Wait a few frames before starting auto-rotate
   
   function init() {
     if (!container || isInitialized) return;
@@ -98,20 +107,35 @@
   function animate() {
     animationId = requestAnimationFrame(animate);
     
+    // Only update and render when visible
+    if (!visible) return;
+    
     if (controls) {
+      // Disable auto-rotate until a few frames after becoming visible (for seamless thumbnail transition)
+      // Also pause when paused prop is true
+      const canAutoRotate = frameCount >= FRAMES_BEFORE_AUTOROTATE;
+      controls.autoRotate = autoRotate && !paused && canAutoRotate;
       controls.update();
     }
     
     if (renderer && scene && camera) {
       renderer.render(scene, camera);
+      // Count frames after becoming visible
+      if (mesh && frameCount < FRAMES_BEFORE_AUTOROTATE) {
+        frameCount++;
+      }
     }
   }
   
-  async function loadMesh(url: string) {
+  async function loadMesh(url: string, force = false) {
     if (!url || !isInitialized) return;
+    
+    // Skip if already loaded (prevents reload on resize/drag)
+    if (url === loadedMeshUrl && !force) return;
     
     isLoading = true;
     error = null;
+    frameCount = 0; // Reset for seamless transition
     
     // Remove existing mesh
     if (mesh) {
@@ -131,7 +155,7 @@
       const gltf = await loader.loadAsync(loadUrl);
       mesh = gltf.scene;
       
-      // Center and scale the mesh
+      // Center and scale the mesh (must match glb-thumbnail.ts exactly!)
       const box = new THREE.Box3().setFromObject(mesh);
       const center = box.getCenter(new THREE.Vector3());
       const size = box.getSize(new THREE.Vector3());
@@ -152,10 +176,13 @@
       // Add to scene
       scene.add(mesh);
       
-      // Reset camera position
+      // Reset camera position (must match glb-thumbnail.ts exactly!)
       camera.position.set(2, 1.5, 2);
       controls.target.set(0, 0, 0);
       controls.update();
+      
+      // Track loaded URL
+      loadedMeshUrl = url;
       
     } catch (e) {
       console.error('Failed to load mesh:', e);
@@ -171,6 +198,16 @@
     camera.aspect = newWidth / newHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(newWidth, newHeight);
+  }
+  
+  // Reset camera to starting position (matches thumbnail exactly)
+  function resetCamera() {
+    if (!isInitialized || !controls) return;
+    
+    camera.position.set(2, 1.5, 2);
+    controls.target.set(0, 0, 0);
+    controls.update();
+    frameCount = 0; // Reset frame count so auto-rotate waits
   }
   
   function cleanup() {
@@ -227,6 +264,16 @@
     }
   });
   
+  // Reset camera when becoming visible (for seamless thumbnail-to-animation transition)
+  let prevVisible = visible;
+  $effect(() => {
+    if (visible && !prevVisible && isInitialized) {
+      // Just became visible - reset to starting position
+      resetCamera();
+    }
+    prevVisible = visible;
+  });
+  
   // Cleanup on destroy
   onDestroy(() => {
     cleanup();
@@ -239,14 +286,14 @@
   style:width="{width}px"
   style:height="{height}px"
 >
-  {#if isLoading}
+  {#if isLoading && showLoading}
     <div class="loading-overlay">
       <div class="spinner"></div>
       <span>Loading 3D model...</span>
     </div>
   {/if}
   
-  {#if error}
+  {#if error && showLoading}
     <div class="error-overlay">
       <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <circle cx="12" cy="12" r="10" />
@@ -257,7 +304,7 @@
     </div>
   {/if}
   
-  {#if !meshUrl}
+  {#if !meshUrl && showLoading}
     <div class="placeholder">
       <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
         <path d="M12 2L2 7l10 5 10-5-10-5z" />

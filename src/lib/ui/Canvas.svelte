@@ -19,6 +19,7 @@
   import { arePortsCompatible } from '../graph/types';
   import { generateGLBThumbnail } from './glb-thumbnail';
   import { getDOMNodeRadius, getDOMBorderWidth, MIN_ZOOM, MAX_ZOOM } from '../canvas/node-style';
+  import MeshViewer from './MeshViewer.svelte';
   
   // Renderer interface
   interface IRenderer {
@@ -1650,10 +1651,17 @@
     error: string | null;
     vertices: number;
     faces: number;
+    rotationX: number;
+    rotationY: number;
+    rotationZ: number;
   }>>([]);
   
   // Cache for generated GLB thumbnails
   let glbThumbnailCache = $state<Map<string, string>>(new Map());
+  
+  // Track which mesh nodes have been activated (had 3D viewer shown)
+  // This prevents remounting/reloading on hover toggle
+  let activatedMeshNodes = $state<Set<string>>(new Set());
   
   // Port overlays computed separately to avoid performance issues
   // Only show ports for hovered/selected nodes or when connecting
@@ -1833,6 +1841,9 @@
           error: node.error || null,
           vertices: (node.params.vertices as number) || 0,
           faces: (node.params.faces as number) || 0,
+          rotationX,
+          rotationY,
+          rotationZ,
         };
       });
   });
@@ -1875,6 +1886,18 @@
             newCache.delete(cacheKey);
             glbThumbnailCache = newCache;
           });
+      }
+    }
+  });
+  
+  // Track activated mesh nodes (ones that have been hovered/selected)
+  // This prevents MeshViewer from being destroyed and recreated on hover toggle
+  $effect(() => {
+    for (const meshNode of meshOutputNodes) {
+      if ((meshNode.isSelected || meshNode.isHovered) && meshNode.meshUrl) {
+        if (!activatedMeshNodes.has(meshNode.id)) {
+          activatedMeshNodes = new Set(activatedMeshNodes).add(meshNode.id);
+        }
       }
     }
   });
@@ -2314,46 +2337,46 @@
         class:error={meshNode.status === 'error'}
         style={`width: ${meshNode.screenWidth}px; height: ${meshNode.screenHeight}px; border-radius: ${meshNode.borderRadius}px; ${meshNode.isSelected || meshNode.isHovered ? `border-width: ${meshNode.borderWidth}px;` : ''}`}
       >
-        {#if meshNode.videoUrl}
-          <!-- Video preview (turntable render) - only if explicitly generated -->
-          <video 
-            src={meshNode.videoUrl} 
-            autoplay
-            loop
-            muted
-            playsinline
-            class="mesh-video-preview"
-            draggable="false"
-          />
-          <!-- 3D badge -->
-          <div class="mesh-badge">3D</div>
-          <!-- Hover overlay -->
-          {#if meshNode.isHovered && !meshNode.isSelected}
-            <div class="image-hover-overlay"></div>
+        {#if meshNode.meshUrl}
+          <!-- Static thumbnail - always rendered, hidden when 3D viewer is active -->
+          {#if meshNode.thumbnailUrl && meshNode.thumbnailUrl !== 'loading'}
+            <img 
+              src={meshNode.thumbnailUrl} 
+              alt="3D mesh preview"
+              draggable="false"
+              class="mesh-thumbnail"
+              class:hidden={meshNode.isSelected || meshNode.isHovered}
+            />
+          {:else}
+            <div class="mesh-placeholder" class:hidden={meshNode.isSelected || meshNode.isHovered}>
+              <div class="thumbnail-loading-spinner"></div>
+              <span>Loading preview...</span>
+            </div>
           {/if}
-        {:else if meshNode.thumbnailUrl && meshNode.thumbnailUrl !== 'loading'}
-          <!-- GLB thumbnail (generated client-side using Three.js) -->
-          <img 
-            src={meshNode.thumbnailUrl} 
-            alt="3D mesh preview"
-            draggable="false"
-          />
-          <!-- 3D badge -->
-          <div class="mesh-badge">3D</div>
-          <!-- Hover overlay -->
-          {#if meshNode.isHovered && !meshNode.isSelected}
-            <div class="image-hover-overlay"></div>
+          <!-- Embedded 3D viewer - stays mounted once activated, visibility toggled -->
+          {#if activatedMeshNodes.has(meshNode.id)}
+            <div 
+              class="mesh-viewer-container"
+              class:visible={meshNode.isSelected || meshNode.isHovered}
+            >
+              <MeshViewer 
+                meshUrl={meshNode.meshUrl}
+                width={Math.round(meshNode.screenWidth)}
+                height={Math.round(meshNode.screenHeight)}
+                autoRotate={true}
+                rotationX={meshNode.rotationX}
+                rotationY={meshNode.rotationY}
+                rotationZ={meshNode.rotationZ}
+                showLoading={false}
+                paused={isDragging}
+                visible={meshNode.isSelected || meshNode.isHovered}
+              />
+            </div>
           {/if}
-        {:else if meshNode.thumbnailUrl === 'loading'}
-          <!-- Loading state while generating thumbnail -->
-          <div class="mesh-placeholder">
-            <div class="thumbnail-loading-spinner"></div>
-            <span>Generating preview...</span>
-          </div>
           <!-- 3D badge -->
           <div class="mesh-badge">3D</div>
         {:else if meshNode.previewUrl}
-          <!-- Static image preview (fallback) -->
+          <!-- Static image preview (fallback when no mesh URL) -->
           <img 
             src={meshNode.previewUrl} 
             alt="3D mesh preview"
@@ -2361,10 +2384,6 @@
           />
           <!-- 3D badge -->
           <div class="mesh-badge">3D</div>
-          <!-- Hover overlay -->
-          {#if meshNode.isHovered && !meshNode.isSelected}
-            <div class="image-hover-overlay"></div>
-          {/if}
         {:else}
           <div class="mesh-placeholder">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -2386,7 +2405,7 @@
         {/if}
       </div>
       <!-- Connector icon - positioned outside overlay to avoid overflow:hidden clipping -->
-      {#if meshNode.videoUrl || meshNode.thumbnailUrl || meshNode.previewUrl}
+      {#if meshNode.meshUrl || meshNode.videoUrl || meshNode.thumbnailUrl || meshNode.previewUrl}
         <div 
           class="node-connector-icon" 
           class:visible={meshNode.isHovered}
@@ -3107,7 +3126,7 @@
     /* border-radius set via inline style for dynamic zoom scaling */
     overflow: hidden; /* Clip content to border-radius */
     pointer-events: none;
-    background: linear-gradient(135deg, #1a2a3f 0%, #1a1a2f 100%);
+    background: #eeeeee; /* Match MeshViewer and thumbnail background */
     user-select: none;
     -webkit-user-select: none;
     transition: border 0.15s ease;
@@ -3161,6 +3180,41 @@
     pointer-events: none;
   }
   
+  /* Embedded MeshViewer container - hidden by default, shown on hover/select */
+  .mesh-viewer-container {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    overflow: hidden;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.03s ease-out;
+    /* No visibility:hidden - keep rendering for smooth cross-fade */
+  }
+  
+  .mesh-viewer-container.visible {
+    opacity: 1;
+  }
+  
+  .mesh-viewer-container :global(canvas) {
+    border-radius: inherit !important;
+    pointer-events: none;
+  }
+  
+  /* Cross-fade thumbnail when 3D viewer is active */
+  .mesh-thumbnail,
+  .mesh-placeholder {
+    transition: opacity 0.2s ease-out;
+  }
+  
+  .mesh-thumbnail.hidden,
+  .mesh-placeholder.hidden {
+    opacity: 0;
+    /* No visibility:hidden - keep in DOM for smooth cross-fade */
+  }
+  
   .mesh-placeholder {
     width: 100%;
     height: 100%;
@@ -3169,7 +3223,8 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    color: rgba(77, 166, 255, 0.7);
+    background: #eeeeee; /* Match MeshViewer background */
+    color: rgba(0, 0, 0, 0.5);
   }
   
   .mesh-placeholder svg {
@@ -3192,8 +3247,8 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    background: rgba(26, 42, 63, 0.95);
-    color: rgba(77, 166, 255, 0.9);
+    background: rgba(238, 238, 238, 0.95); /* Match MeshViewer background */
+    color: rgba(0, 0, 0, 0.6);
     font-size: 11px;
     border-radius: inherit;
   }
@@ -3201,8 +3256,8 @@
   .mesh-spinner {
     width: 24px;
     height: 24px;
-    border: 2px solid rgba(77, 166, 255, 0.2);
-    border-top-color: #4da6ff;
+    border: 2px solid rgba(0, 0, 0, 0.1);
+    border-top-color: #6366f1;
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
   }
@@ -3210,8 +3265,8 @@
   .thumbnail-loading-spinner {
     width: 32px;
     height: 32px;
-    border: 2px solid rgba(77, 166, 255, 0.2);
-    border-top-color: #4da6ff;
+    border: 2px solid rgba(0, 0, 0, 0.1);
+    border-top-color: #6366f1;
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
   }
