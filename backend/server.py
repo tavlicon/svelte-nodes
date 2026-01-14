@@ -31,6 +31,7 @@ from app.config import load_settings
 from app.runtime.device import get_device_and_dtype as _get_device_and_dtype
 from app.storage.artifacts import ArtifactPaths
 from app.services.img2img_service import Img2ImgService, Img2ImgParams
+from app.services.triposr_service import TripoSRService, TripoSRParams
 
 # Configure logging
 logging.basicConfig(
@@ -907,181 +908,28 @@ async def generate_3d_mesh(
         success = load_triposr_model(chunk_size)
         if not success:
             raise HTTPException(status_code=503, detail="TripoSR model not available")
-    else:
-        # Update chunk size
-        triposr_model.renderer.set_chunk_size(chunk_size)
     
     try:
-        import trimesh
-        
-        # Read and process input image
-        logger.info("📷 Processing input image...")
         image_data = await image.read()
-        input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
-        logger.info(f"  Input size: {input_image.width}x{input_image.height}")
-        
-        # Remove background if requested
-        if remove_bg:
-            logger.info("  Removing background...")
-            input_image = remove_background_tsr(input_image, foreground_ratio)
-            logger.info(f"  After background removal: {input_image.width}x{input_image.height}")
-        else:
-            # Just resize to proper size
-            input_image = process_triposr_image(input_image, 512)
-        
-        logger.info(f"  Final input size: {input_image.width}x{input_image.height}")
-        
-        start_time = time.time()
-        
-        # Get device
-        device = str(next(triposr_model.parameters()).device)
-        
-        # Run TSR model forward pass to get scene codes
-        logger.info("🧠 Running TSR inference...")
-        with torch.no_grad():
-            scene_codes = triposr_model([input_image], device=device)
-        
-        logger.info(f"  Scene codes shape: {scene_codes.shape}")
-        
-        # Extract mesh using marching cubes
-        logger.info(f"🔺 Extracting mesh at resolution {mc_resolution}...")
-        with torch.no_grad():
-            meshes = triposr_model.extract_mesh(
-                scene_codes,
-                has_vertex_color=(not bake_texture),
-                resolution=mc_resolution,
-            )
-        
-        mesh = meshes[0]
-        
-        # Apply orientation correction: TripoSR outputs meshes in canonical pose
-        # (typically Y-up/vertical). Rotate -90° around X to lay objects flat.
-        # Users can fine-tune with the UI orientation controls.
-        # PREVIOUS: Single rotation (commented out for rollback)
-        # logger.info("🔄 Applying default orientation correction (-90° X-axis)...")
-        # rotation_matrix = trimesh.transformations.rotation_matrix(
-        #     # np.radians(-90), [1, 0, 0], point=[0, 0, 0]
-        #     # np.radians(0), [0, 1, 0], point=[0, 0, 0]
-        #     np.radians(90), [0, 0, 1], point=[0, 0, 0]
-        # )
-        # mesh.apply_transform(rotation_matrix)
-        
-        # Apply orientation correction
-        logger.info("🔄 Applying default orientation correction...")
-        
-        # First: rotate 90° around Z to lay flat on correct axis
-        rotation_z = trimesh.transformations.rotation_matrix(
-            np.radians(90), [0, 0, 1], point=[0, 0, 0]
+        svc = TripoSRService(SETTINGS.output_dir)
+        result = await svc.run(
+            triposr_model=triposr_model,
+            triposr_loaded=triposr_loaded,
+            params=TripoSRParams(
+                foreground_ratio=foreground_ratio,
+                mc_resolution=mc_resolution,
+                remove_bg=remove_bg,
+                chunk_size=chunk_size,
+                bake_texture=bake_texture,
+                texture_resolution=texture_resolution,
+                render_video=render_video,
+                render_n_views=render_n_views,
+                render_resolution=render_resolution,
+            ),
+            image_bytes=image_data,
         )
-        mesh.apply_transform(rotation_z)
-        
-        # Second: rotate 180° around Y to face forward
-        rotation_y = trimesh.transformations.rotation_matrix(
-            np.radians(180), [0, 1, 0], point=[0, 0, 0]
-        )
-        mesh.apply_transform(rotation_y)
-        
-        # Handle texture baking if requested
-        if bake_texture:
-            logger.info(f"🎨 Baking texture at resolution {texture_resolution}...")
-            try:
-                import xatlas
-                from tsr.bake_texture import bake_texture as bake_texture_fn
-                
-                bake_output = bake_texture_fn(mesh, triposr_model, scene_codes[0], texture_resolution)
-                
-                # Update mesh with UV mapping
-                mesh = trimesh.Trimesh(
-                    vertices=mesh.vertices[bake_output["vmapping"]],
-                    faces=bake_output["indices"],
-                    visual=trimesh.visual.TextureVisuals(
-                        uv=bake_output["uvs"],
-                    ),
-                )
-                logger.info("  Texture baked successfully")
-            except Exception as e:
-                logger.warning(f"  Texture baking failed, using vertex colors: {e}")
-        
-        mesh_time = time.time() - start_time
-        logger.info(f"✅ Mesh generation complete in {mesh_time:.2f}s")
-        logger.info(f"  Vertices: {len(mesh.vertices)}, Faces: {len(mesh.faces)}")
-        
-        # Save mesh as GLB
-        artifacts = ArtifactPaths(SETTINGS.output_dir)
-        artifacts.ensure()
-        output_path = artifacts.mesh_path()
-        output_filename = output_path.name
-        
-        # Export to GLB
-        mesh.export(str(output_path), file_type="glb")
-        logger.info(f"💾 Saved to: {output_path}")
-        
-        # Generate turntable video if requested
-        video_url = None
-        video_time = 0.0
-        if render_video:
-            logger.info(f"🎬 Rendering turntable video ({render_n_views} frames at {render_resolution}px)...")
-            video_start = time.time()
-            try:
-                from tsr.utils import save_video
-                
-                # Render frames using NeRF
-                with torch.no_grad():
-                    render_images = triposr_model.render(
-                        scene_codes,
-                        n_views=render_n_views,
-                        height=render_resolution,
-                        width=render_resolution,
-                        return_type="pil"
-                    )
-                
-                # Save as MP4
-                video_path = artifacts.video_path(output_path)
-                video_filename = video_path.name
-                # Use 12fps for slower, smoother turntable animation
-                save_video(render_images[0], str(video_path), fps=12)
-                
-                video_time = time.time() - video_start
-                video_url = f"/data/output/{video_filename}"
-                logger.info(f"  Video saved to: {video_path} ({video_time:.2f}s)")
-            except Exception as e:
-                logger.warning(f"  Video rendering failed: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        # Also save a rendered preview image (fallback for no-video case)
-        preview_path = artifacts.preview_path(output_path)
-        preview_filename = preview_path.name
-        
-        # Create a simple preview by rendering the mesh
-        preview_url = None
-        try:
-            scene = mesh.scene()
-            # Get PNG data from scene
-            png_data = scene.save_image(resolution=(512, 512))
-            with open(preview_path, 'wb') as f:
-                f.write(png_data)
-            logger.info(f"  Preview saved to: {preview_path}")
-            preview_url = f"/data/output/{preview_filename}"
-        except Exception as e:
-            logger.warning(f"  Could not generate preview: {e}")
-        
-        total_time = time.time() - start_time
-        logger.info(f"⏱️ Total time: {total_time:.2f}s (mesh: {mesh_time:.2f}s, video: {video_time:.2f}s)")
         logger.info("=" * 50)
-        
-        return {
-            "status": "success",
-            "mesh_path": f"/data/output/{output_filename}",
-            "video_url": video_url,
-            "preview_url": preview_url,
-            "output_path": str(output_path),
-            "time_taken": total_time,
-            "mesh_time": mesh_time,
-            "video_time": video_time if render_video else None,
-            "vertices": len(mesh.vertices),
-            "faces": len(mesh.faces),
-        }
+        return result
         
     except Exception as e:
         logger.error(f"❌ Error during TripoSR inference: {e}")
