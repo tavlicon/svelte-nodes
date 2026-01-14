@@ -603,7 +603,24 @@ async def img2img_stream(
         error_msg = f"Invalid parameter combination: steps={steps} × denoise={denoise} = {effective_steps} effective steps. Need at least 1. Try increasing steps (≥10) or denoise (≥0.1)."
         raise HTTPException(status_code=400, detail=error_msg)
     
+    # region agent log
+    try:
+        SETTINGS.debug_log_path.open("a").write(json.dumps({
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": "H1",
+            "location": "backend/server.py:img2img_stream",
+            "message": "Entered img2img_stream endpoint",
+            "data": {"steps": steps, "sampler": sampler_name, "scheduler": scheduler, "denoise": denoise},
+            "timestamp": int(time.time() * 1000)
+        }) + "\n")
+    except Exception:
+        pass
+    # endregion
+
     async def generate():
+        rec = None
+        q = None
         try:
             image_bytes = await image.read()
             rec = await JOB_STORE.create(
@@ -637,6 +654,21 @@ async def img2img_stream(
             # Replay history then subscribe for live events (legacy event mapping)
             history = await JOB_STORE.list_events_snapshot(rec.job_id)
             q = await JOB_STORE.subscribe(rec.job_id)
+            # region agent log
+            try:
+                SETTINGS.debug_log_path.open("a").write(json.dumps({
+                    "sessionId": "debug-session",
+                    "runId": "run1",
+                    "hypothesisId": "H1",
+                    "location": "backend/server.py:img2img_stream.generate",
+                    "message": "Subscribed to job events",
+                    "data": {"jobId": rec.job_id},
+                    "timestamp": int(time.time() * 1000)
+                }) + "\n")
+            except Exception:
+                pass
+            # endregion
+
             try:
                 events = history
                 while True:
@@ -667,17 +699,32 @@ async def img2img_stream(
                     elif ev.event == "cancelled":
                         yield {"event": "error", "data": json.dumps({"status": "error", "message": "Cancelled"})}
                         return
+            finally:
+                if rec is not None and q is not None:
+                    try:
+                        await JOB_STORE.unsubscribe(rec.job_id, q)
+                    except Exception:
+                        pass
+                # region agent log
+                try:
+                    SETTINGS.debug_log_path.open("a").write(json.dumps({
+                        "sessionId": "debug-session",
+                        "runId": "run1",
+                        "hypothesisId": "H1",
+                        "location": "backend/server.py:img2img_stream.generate",
+                        "message": "Unsubscribed from job events",
+                        "data": {"jobId": rec.job_id if rec is not None else None},
+                        "timestamp": int(time.time() * 1000)
+                    }) + "\n")
+                except Exception:
+                    pass
+                # endregion
             
         except Exception as e:
             yield {
                 "event": "error",
                 "data": json.dumps({"status": "error", "message": str(e)})
             }
-        finally:
-            try:
-                await JOB_STORE.unsubscribe(rec.job_id, q)  # type: ignore[name-defined]
-            except Exception:
-                pass
     
     return EventSourceResponse(generate())
 
