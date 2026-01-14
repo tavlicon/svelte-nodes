@@ -30,6 +30,7 @@ from sse_starlette.sse import EventSourceResponse
 from app.config import load_settings
 from app.runtime.device import get_device_and_dtype as _get_device_and_dtype
 from app.storage.artifacts import ArtifactPaths
+from app.services.img2img_service import Img2ImgService, Img2ImgParams
 
 # Configure logging
 logging.basicConfig(
@@ -425,28 +426,6 @@ async def img2img(
         input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
         logger.info(f"  Input size: {input_image.width}x{input_image.height}")
         
-        # Resize to target dimensions (must be divisible by 8)
-        # Cap maximum dimension to prevent memory issues (SD 1.5 works best at 512-768)
-        MAX_DIMENSION = 768
-        
-        width = input_image.width
-        height = input_image.height
-        
-        # Scale down if too large while maintaining aspect ratio
-        if width > MAX_DIMENSION or height > MAX_DIMENSION:
-            scale = MAX_DIMENSION / max(width, height)
-            width = int(width * scale)
-            height = int(height * scale)
-            logger.info(f"  Scaling down to fit {MAX_DIMENSION}px max dimension")
-        
-        # Make divisible by 8
-        width = (width // 8) * 8
-        height = (height // 8) * 8
-        
-        if width != input_image.width or height != input_image.height:
-            input_image = input_image.resize((width, height), Image.Resampling.LANCZOS)
-            logger.info(f"  Resized to: {width}x{height}")
-        
         # Set up scheduler
         logger.info(f"⚙️ Setting up scheduler: {sampler_name} ({scheduler})")
         pipeline.scheduler = get_scheduler(
@@ -454,65 +433,38 @@ async def img2img(
             scheduler, 
             pipeline.scheduler.config
         )
-        
-        # Set seed for reproducibility
-        generator = torch.Generator(device=current_device)
-        if seed >= 0:
-            generator = generator.manual_seed(seed)
-            logger.info(f"  Using seed: {seed}")
-        else:
-            random_seed = torch.randint(0, 2**32 - 1, (1,)).item()
-            generator = generator.manual_seed(random_seed)
-            logger.info(f"  Using random seed: {random_seed}")
-        
-        # Run inference
+
         logger.info("🚀 Starting inference...")
-        start_time = time.time()
-        
-        result = pipeline(
-            prompt=positive_prompt,
-            negative_prompt=negative_prompt,
-            image=input_image,
-            strength=denoise,
-            num_inference_steps=steps,
-            guidance_scale=cfg,
-            generator=generator,
+        svc = Img2ImgService(SETTINGS.output_dir)
+        result = svc.run(
+            pipeline=pipeline,
+            model_loaded=model_loaded,
+            params=Img2ImgParams(
+                positive_prompt=positive_prompt,
+                negative_prompt=negative_prompt,
+                seed=seed,
+                steps=steps,
+                cfg=cfg,
+                sampler_name=sampler_name,
+                scheduler=scheduler,
+                denoise=denoise,
+            ),
+            input_image=input_image,
+            current_device=current_device,
         )
-        
-        elapsed_time = time.time() - start_time
-        logger.info(f"✅ Inference complete in {elapsed_time:.2f}s")
-        
-        # Get output image
-        output_image = result.images[0]
-        logger.info(f"  Output size: {output_image.width}x{output_image.height}")
-        
-        # Debug: Check if output is black
-        import numpy as np
-        output_array = np.array(output_image)
-        logger.info(f"  Output stats: min={output_array.min()}, max={output_array.max()}, mean={output_array.mean():.2f}")
-        if output_array.max() == 0:
-            logger.warning("⚠️ Output image is all black! This indicates a VAE decoding issue.")
-        
-        # Save to output directory
-        artifacts = ArtifactPaths(SETTINGS.output_dir)
-        artifacts.ensure()
-        output_path = artifacts.img2img_path(seed)
-        output_image.save(output_path)
-        logger.info(f"💾 Saved to: {output_path}")
-        
-        # Convert to base64
-        output_base64 = image_to_base64(output_image)
-        
+
+        logger.info(f"✅ Inference complete in {result['time_taken']:.2f}s")
+        logger.info(f"  Output size: {result['width']}x{result['height']}")
+        dbg = result.get("debug", {})
+        if dbg:
+            logger.info(f"  Output stats: min={dbg.get('min')}, max={dbg.get('max')}, mean={dbg.get('mean'):.2f}")
+            if dbg.get("max") == 0:
+                logger.warning("⚠️ Output image is all black! This indicates a VAE decoding issue.")
+        logger.info(f"💾 Saved to: {result.get('output_path')}")
+
+        # Preserve existing response shape (do not include debug)
         logger.info("=" * 50)
-        
-        return {
-            "status": "success",
-            "image": f"data:image/png;base64,{output_base64}",
-            "time_taken": elapsed_time,
-            "width": output_image.width,
-            "height": output_image.height,
-            "output_path": str(output_path),
-        }
+        return {k: result[k] for k in ["status", "image", "time_taken", "width", "height", "output_path"]}
         
     except Exception as e:
         logger.error(f"❌ Error during inference: {e}")
