@@ -508,91 +508,94 @@ async def img2img_stream(
     
     async def generate():
         try:
-            # Read and process input image
-            image_data = await image.read()
-            input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
-            
-            # Resize to target dimensions
-            # Cap maximum dimension to prevent memory issues
-            MAX_DIMENSION = 768
-            
-            width = input_image.width
-            height = input_image.height
-            
-            # Scale down if too large while maintaining aspect ratio
-            if width > MAX_DIMENSION or height > MAX_DIMENSION:
-                scale = MAX_DIMENSION / max(width, height)
-                width = int(width * scale)
-                height = int(height * scale)
-            
-            # Make divisible by 8
-            width = (width // 8) * 8
-            height = (height // 8) * 8
-            
-            if width != input_image.width or height != input_image.height:
-                input_image = input_image.resize((width, height), Image.Resampling.LANCZOS)
-            
-            # Set up scheduler
-            pipeline.scheduler = get_scheduler(
-                sampler_name,
-                scheduler,
-                pipeline.scheduler.config
-            )
-            
-            # Set seed
-            generator = torch.Generator(device=current_device)
-            if seed >= 0:
-                generator = generator.manual_seed(seed)
-            else:
-                generator = generator.manual_seed(torch.randint(0, 2**32 - 1, (1,)).item())
-            
-            # Progress callback
-            def progress_callback(step: int, timestep: int, latents: torch.Tensor):
-                progress_data = {
-                    "step": step + 1,
-                    "total_steps": steps,
-                    "progress": (step + 1) / steps * 100,
+            # Ensure consistent backpressure across ALL SD endpoints.
+            # We must hold the semaphore during scheduler mutation + pipeline execution.
+            async with CONCURRENCY.sd_img2img:
+                # Read and process input image
+                image_data = await image.read()
+                input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
+                
+                # Resize to target dimensions
+                # Cap maximum dimension to prevent memory issues
+                MAX_DIMENSION = 768
+                
+                width = input_image.width
+                height = input_image.height
+                
+                # Scale down if too large while maintaining aspect ratio
+                if width > MAX_DIMENSION or height > MAX_DIMENSION:
+                    scale = MAX_DIMENSION / max(width, height)
+                    width = int(width * scale)
+                    height = int(height * scale)
+                
+                # Make divisible by 8
+                width = (width // 8) * 8
+                height = (height // 8) * 8
+                
+                if width != input_image.width or height != input_image.height:
+                    input_image = input_image.resize((width, height), Image.Resampling.LANCZOS)
+                
+                # Set up scheduler
+                pipeline.scheduler = get_scheduler(
+                    sampler_name,
+                    scheduler,
+                    pipeline.scheduler.config
+                )
+                
+                # Set seed
+                generator = torch.Generator(device=current_device)
+                if seed >= 0:
+                    generator = generator.manual_seed(seed)
+                else:
+                    generator = generator.manual_seed(torch.randint(0, 2**32 - 1, (1,)).item())
+                
+                # Progress callback
+                def progress_callback(step: int, timestep: int, latents: torch.Tensor):
+                    progress_data = {
+                        "step": step + 1,
+                        "total_steps": steps,
+                        "progress": (step + 1) / steps * 100,
+                    }
+                    progress_updates[request_id].append(progress_data)
+                
+                # Send initial progress
+                yield {
+                    "event": "progress",
+                    "data": json.dumps({"step": 0, "total_steps": steps, "progress": 0, "status": "starting"})
                 }
-                progress_updates[request_id].append(progress_data)
-            
-            # Send initial progress
-            yield {
-                "event": "progress",
-                "data": json.dumps({"step": 0, "total_steps": steps, "progress": 0, "status": "starting"})
-            }
-            
-            start_time = time.time()
-            
-            # Run inference with callback
-            result = pipeline(
-                prompt=positive_prompt,
-                negative_prompt=negative_prompt,
-                image=input_image,
-                strength=denoise,
-                num_inference_steps=steps,
-                guidance_scale=cfg,
-                generator=generator,
-                callback=progress_callback,
-                callback_steps=1,
-            )
-            
-            elapsed_time = time.time() - start_time
-            
-            # Get output image
-            output_image = result.images[0]
-            output_base64 = image_to_base64(output_image)
-            
-            # Send completion
-            yield {
-                "event": "complete",
-                "data": json.dumps({
-                    "status": "success",
-                    "image": f"data:image/png;base64,{output_base64}",
-                    "time_taken": elapsed_time,
-                    "width": output_image.width,
-                    "height": output_image.height,
-                })
-            }
+                
+                start_time = time.time()
+                
+                # Run inference with callback
+                result = pipeline(
+                    prompt=positive_prompt,
+                    negative_prompt=negative_prompt,
+                    image=input_image,
+                    strength=denoise,
+                    num_inference_steps=steps,
+                    guidance_scale=cfg,
+                    generator=generator,
+                    callback=progress_callback,
+                    callback_steps=1,
+                )
+                
+                elapsed_time = time.time() - start_time
+                
+                # Get output image
+                output_image = result.images[0]
+                output_base64 = image_to_base64(output_image)
+                
+                # Send completion
+                yield {
+                    "event": "complete",
+                    "data": json.dumps({
+                        "status": "success",
+                        "image": f"data:image/png;base64,{output_base64}",
+                        "time_taken": elapsed_time,
+                        "width": output_image.width,
+                        "height": output_image.height,
+                    })
+                }
             
         except Exception as e:
             yield {
@@ -657,37 +660,38 @@ async def img2img_base64(
         if width != input_image.width or height != input_image.height:
             input_image = input_image.resize((width, height), Image.Resampling.LANCZOS)
         
-        # Set up scheduler
-        pipeline.scheduler = get_scheduler(
-            sampler_name,
-            scheduler,
-            pipeline.scheduler.config
-        )
-        
-        # Set seed for reproducibility
-        generator = torch.Generator(device=current_device)
-        if seed >= 0:
-            generator = generator.manual_seed(seed)
-        else:
-            generator = generator.manual_seed(torch.randint(0, 2**32 - 1, (1,)).item())
-        
-        # Run inference
-        start_time = time.time()
-        
-        result = pipeline(
-            prompt=positive_prompt,
-            negative_prompt=negative_prompt,
-            image=input_image,
-            strength=denoise,
-            num_inference_steps=steps,
-            guidance_scale=cfg,
-            generator=generator,
-        )
-        
-        elapsed_time = time.time() - start_time
-        
-        # Get output image
-        output_image = result.images[0]
+        async with CONCURRENCY.sd_img2img:
+            # Set up scheduler
+            pipeline.scheduler = get_scheduler(
+                sampler_name,
+                scheduler,
+                pipeline.scheduler.config
+            )
+            
+            # Set seed for reproducibility
+            generator = torch.Generator(device=current_device)
+            if seed >= 0:
+                generator = generator.manual_seed(seed)
+            else:
+                generator = generator.manual_seed(torch.randint(0, 2**32 - 1, (1,)).item())
+            
+            # Run inference
+            start_time = time.time()
+            
+            result = pipeline(
+                prompt=positive_prompt,
+                negative_prompt=negative_prompt,
+                image=input_image,
+                strength=denoise,
+                num_inference_steps=steps,
+                guidance_scale=cfg,
+                generator=generator,
+            )
+            
+            elapsed_time = time.time() - start_time
+            
+            # Get output image
+            output_image = result.images[0]
         
         # Convert to base64
         output_base64 = image_to_base64(output_image)
