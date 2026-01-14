@@ -250,6 +250,7 @@ The toolbar will show backend status:
 ```
 ├── backend/              # Python inference server
 │   ├── server.py        # FastAPI server (SD 1.5 + TripoSR)
+│   ├── app/             # Phase_0 refactor modules (settings/services/runtime/storage)
 │   ├── requirements.txt # Python dependencies (diffusers, trimesh, rembg, etc.)
 │   └── venv/            # Python virtual environment
 ├── data/                 # Local storage (gitignored contents)
@@ -334,7 +335,9 @@ Generates 3D mesh from image. Form data:
 Returns:
 ```json
 {
-  "mesh_url": "/data/output/mesh_123456_abc123.glb",
+  "mesh_path": "/data/output/mesh_123456_abc123.glb",
+  "video_url": "/data/output/render_123456_abc123.mp4",
+  "preview_url": "/data/output/mesh_123456_abc123_preview.png",
   "output_path": "/path/to/data/output/mesh_123456_abc123.glb",
   "time_taken": 1.2,
   "vertices": 642,
@@ -432,6 +435,19 @@ Tips:
 - Use fewer steps (3-10 with LCM sampler)
 - Lower CFG scale (2-4 with LCM)
 - Use 512x512 input images
+
+## Backend configuration (Phase_0)
+
+Optional environment variables (defaults preserve current behavior):
+
+- `DNA_DATA_DIR`: defaults to `<repo>/data`
+- `DNA_OUTPUT_DIR`: defaults to `<repo>/data/output`
+- `DNA_CORS_ALLOW_ORIGINS`: JSON list or comma-separated origins
+- `DNA_DEBUG_LOG_PATH`: defaults to `<repo>/.cursor/debug.log`
+
+## Backend concurrency (Phase_0)
+
+The backend now applies **per-model concurrency guards** (default: 1 in-flight SD img2img and 1 in-flight TripoSR) to reduce GPU/MPS contention under concurrent usage.
 
 ### TripoSR 3D Mesh
 

@@ -7,6 +7,17 @@ This repository’s “backend” is a **single FastAPI process** responsible fo
 
 It is designed primarily for **local/offline** use, but can be evolved into a cloud service.
 
+## Phase_0 refactor status (executed)
+
+The Phase_0 “safe refactor” has been **executed** (not just planned) on the `phase0-backend-refactor` branch. Behavior is intended to be preserved, but internal code is now split into a small package:
+
+- `backend/app/config.py`: env-based backend settings (paths, CORS, debug log path)
+- `backend/app/runtime/device.py`: device + dtype selection (preserves MPS float32 rule)
+- `backend/app/storage/artifacts.py`: centralized artifact naming/paths
+- `backend/app/services/img2img_service.py`: SD img2img orchestration extracted from `server.py`
+- `backend/app/services/triposr_service.py`: TripoSR orchestration extracted from `server.py`
+- `backend/app/runtime/concurrency.py`: per-model semaphores (default 1 in-flight per model)
+
 ## High-level data flow
 
 ```mermaid
@@ -29,6 +40,15 @@ Key point: **`backend/server.py` writes artifacts into `data/output/` and return
   - `python server.py`
 - `server.py` also supports `python server.py` directly and runs uvicorn on `0.0.0.0:8000`.
 
+## Environment variables (Phase_0)
+
+The backend now supports these optional settings (defaults keep current behavior):
+
+- `DNA_DATA_DIR`: defaults to `<repo>/data`
+- `DNA_OUTPUT_DIR`: defaults to `<repo>/data/output`
+- `DNA_CORS_ALLOW_ORIGINS`: either JSON list or comma-separated string
+- `DNA_DEBUG_LOG_PATH`: defaults to `<repo>/.cursor/debug.log`
+
 ## Devices, precision, and why it matters
 
 `server.py` picks a device via `get_device_and_dtype()`:
@@ -41,7 +61,8 @@ Key point: **`backend/server.py` writes artifacts into `data/output/` and return
 
 Yes—significantly.
 
-- **Stable Diffusion** is dominated by repeated UNet denoising passes. A GPU (CUDA or MPS) is typically **multiple times faster** than CPU, and CUDA FP16 is usually fastest.\n+- **TripoSR** includes neural rendering / triplane queries and can also be **much faster** on GPU. It also supports chunking to reduce peak memory (`chunk_size`).
+- **Stable Diffusion** is dominated by repeated UNet denoising passes. A GPU (CUDA or MPS) is typically **multiple times faster** than CPU, and CUDA FP16 is usually fastest.
+- **TripoSR** includes neural rendering / triplane queries and can also be **much faster** on GPU. It also supports chunking to reduce peak memory (`chunk_size`).
 
 For your stated target (“MacBook Pro M2–M4 now, cloud GPU later”), MPS is a good local baseline, and a single cloud NVIDIA GPU worker is the typical next step for higher throughput.
 
@@ -81,6 +102,8 @@ The model loader:
 ## API endpoints (current)
 
 All endpoints are implemented in `backend/server.py`.
+
+Phase_0 note: handlers now **delegate** to `backend/app/services/*` for SD and TripoSR orchestration, but the endpoints and response shapes are intended to remain the same.
 
 ### Health and model status
 
@@ -123,12 +146,14 @@ All endpoints are implemented in `backend/server.py`.
 
 ## Concurrency + scaling implications (current)
 
-The backend is not yet structured for multi-user concurrency:
+The backend is partially structured for multi-user concurrency (Phase_0):
 
 - Uses **global mutable state** (`pipeline`, `triposr_model`, `model_loaded`, `triposr_loaded`, `current_device`).
 - Runs heavy compute **inline in request handlers**; on typical uvicorn setups, this will reduce effective concurrency and can increase tail latency.
-- No per-model **locks/semaphores**—two requests can try to use the same pipeline concurrently (often unsafe for GPU memory and can thrash performance).
+- **Now includes per-model semaphores** in `backend/app/runtime/concurrency.py` to reduce GPU/MPS contention:
+  - SD img2img: 1 in-flight (default)
+  - TripoSR: 1 in-flight (default)
 - Artifact URLs assume a separate file server exists (`/data/*`).
 
-These are the main issues the next refactor will address.
+Remaining scaling work is captured in the job-based design (`backend/JOB_API_DESIGN.md`).
 
