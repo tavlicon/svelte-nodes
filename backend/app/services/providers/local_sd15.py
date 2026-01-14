@@ -37,23 +37,26 @@ class LocalSD15Provider(Img2ImgProvider):
 
         image_bytes: bytes = payload["image_bytes"]
         params_dict: dict = payload["params"]
+        emit_progress: bool = bool(payload.get("emit_progress", True))
 
         # Ensure consistent backpressure with existing semaphores
         async with self.deps.concurrency.sd_img2img:
             # scheduler mutation must be guarded too (shared pipeline)
             self.deps.set_scheduler(pipeline, params_dict["sampler_name"], params_dict["scheduler"])
 
-            # progress callback hooks
-            total_steps = int(params_dict["steps"])
-            loop = asyncio.get_running_loop()
+            progress_callback = None
+            if emit_progress:
+                # progress callback hooks
+                total_steps = int(params_dict["steps"])
+                loop = asyncio.get_running_loop()
 
-            def progress_callback(step: int, timestep: int, latents: torch.Tensor):
-                # step is 0-indexed in diffusers callback
-                loop.call_soon_threadsafe(
-                    lambda: asyncio.create_task(
-                        emitter.progress(current=step + 1, total=total_steps, stage="denoise")
+                def progress_callback(step: int, timestep: int, latents: torch.Tensor):
+                    # step is 0-indexed in diffusers callback
+                    loop.call_soon_threadsafe(
+                        lambda: asyncio.create_task(
+                            emitter.progress(current=step + 1, total=total_steps, stage="denoise")
+                        )
                     )
-                )
 
             # Run in a thread to avoid blocking the event loop
             def _run_sync() -> dict:

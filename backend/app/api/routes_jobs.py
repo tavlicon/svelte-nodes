@@ -68,6 +68,8 @@ def create_jobs_router(
         image_bytes = await image.read()
         payload = {
             "image_bytes": image_bytes,
+            # Job API defaults to progress enabled so SSE/polling clients get progress updates.
+            "emit_progress": True,
             "params": {
                 "positive_prompt": positive_prompt,
                 "negative_prompt": negative_prompt,

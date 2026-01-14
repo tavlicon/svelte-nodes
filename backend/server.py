@@ -540,6 +540,8 @@ async def img2img(
             "img2img",
             {
                 "image_bytes": image_bytes,
+                # Legacy non-stream endpoint doesn't need step progress; avoid callback overhead.
+                "emit_progress": False,
                 "params": {
                     "positive_prompt": positive_prompt,
                     "negative_prompt": negative_prompt,
@@ -608,6 +610,8 @@ async def img2img_stream(
                 "img2img",
                 {
                     "image_bytes": image_bytes,
+                    # Stream endpoint needs progress.
+                    "emit_progress": True,
                     "params": {
                         "positive_prompt": positive_prompt,
                         "negative_prompt": negative_prompt,
@@ -715,6 +719,8 @@ async def img2img_base64(
             "img2img",
             {
                 "image_bytes": image_bytes,
+                # Legacy non-stream endpoint doesn't need step progress; avoid callback overhead.
+                "emit_progress": False,
                 "params": {
                     "positive_prompt": positive_prompt,
                     "negative_prompt": negative_prompt,
