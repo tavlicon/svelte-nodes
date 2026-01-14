@@ -27,6 +27,10 @@ from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from app.config import load_settings
+from app.runtime.device import get_device_and_dtype as _get_device_and_dtype
+from app.storage.artifacts import ArtifactPaths
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -55,13 +59,12 @@ from transformers import CLIPTextModel, CLIPTokenizer
 
 app = FastAPI(title="Generative Design Studio Backend", version="1.0.0")
 
-# Debug instrumentation configuration (do not remove until post-fix verification)
-DEBUG_LOG_PATH = Path("/Users/olicon/github/generative-design-studio-2/.cursor/debug.log")
+SETTINGS = load_settings()
 
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=SETTINGS.cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -134,13 +137,7 @@ def get_scheduler(sampler_name: str, scheduler_type: str, config):
 
 def get_device_and_dtype():
     """Determine the best device and dtype for inference"""
-    if torch.cuda.is_available():
-        return "cuda", torch.float16
-    elif torch.backends.mps.is_available():
-        # MPS works best with float32 to avoid NaN issues in VAE
-        return "mps", torch.float32
-    else:
-        return "cpu", torch.float32
+    return _get_device_and_dtype()
 
 
 def load_model_local(model_path: str):
@@ -269,8 +266,8 @@ async def startup_event():
 
     # region agent log
     try:
-        DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        DEBUG_LOG_PATH.open("a").write(json.dumps({
+        SETTINGS.debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS.debug_log_path.open("a").write(json.dumps({
             "sessionId": "debug-session",
             "runId": "pre-fix",
             "hypothesisId": "H1",
@@ -334,7 +331,7 @@ async def startup_event():
 
     # region agent log
     try:
-        DEBUG_LOG_PATH.open("a").write(json.dumps({
+        SETTINGS.debug_log_path.open("a").write(json.dumps({
             "sessionId": "debug-session",
             "runId": "pre-fix",
             "hypothesisId": "H1",
@@ -497,10 +494,9 @@ async def img2img(
             logger.warning("⚠️ Output image is all black! This indicates a VAE decoding issue.")
         
         # Save to output directory
-        output_dir = Path(__file__).parent.parent / "data" / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_filename = f"img2img_{int(time.time())}_{seed}.png"
-        output_path = output_dir / output_filename
+        artifacts = ArtifactPaths(SETTINGS.output_dir)
+        artifacts.ensure()
+        output_path = artifacts.img2img_path(seed)
         output_image.save(output_path)
         logger.info(f"💾 Saved to: {output_path}")
         
@@ -1059,12 +1055,10 @@ async def generate_3d_mesh(
         logger.info(f"  Vertices: {len(mesh.vertices)}, Faces: {len(mesh.faces)}")
         
         # Save mesh as GLB
-        output_dir = Path(__file__).parent.parent / "data" / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = int(time.time())
-        unique_id = uuid.uuid4().hex[:8]
-        output_filename = f"mesh_{timestamp}_{unique_id}.glb"
-        output_path = output_dir / output_filename
+        artifacts = ArtifactPaths(SETTINGS.output_dir)
+        artifacts.ensure()
+        output_path = artifacts.mesh_path()
+        output_filename = output_path.name
         
         # Export to GLB
         mesh.export(str(output_path), file_type="glb")
@@ -1090,8 +1084,8 @@ async def generate_3d_mesh(
                     )
                 
                 # Save as MP4
-                video_filename = f"render_{timestamp}_{unique_id}.mp4"
-                video_path = output_dir / video_filename
+                video_path = artifacts.video_path(output_path)
+                video_filename = video_path.name
                 # Use 12fps for slower, smoother turntable animation
                 save_video(render_images[0], str(video_path), fps=12)
                 
@@ -1104,8 +1098,8 @@ async def generate_3d_mesh(
                 traceback.print_exc()
         
         # Also save a rendered preview image (fallback for no-video case)
-        preview_filename = output_filename.replace(".glb", "_preview.png")
-        preview_path = output_dir / preview_filename
+        preview_path = artifacts.preview_path(output_path)
+        preview_filename = preview_path.name
         
         # Create a simple preview by rendering the mesh
         preview_url = None
