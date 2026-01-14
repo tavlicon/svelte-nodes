@@ -345,6 +345,29 @@ Returns:
 }
 ```
 
+## Phase_1 Jobs API (local-first queue)
+
+Phase_1 adds a **job-based API** that allows the backend to queue work and stream progress via SSE, while keeping legacy endpoints intact.
+
+- `POST /api/jobs/img2img` → returns `job_id` (multipart form: same fields as `/api/img2img`)
+- `POST /api/jobs/triposr` → returns `job_id` (multipart form: same fields as `/api/triposr`)
+- `GET /api/jobs/{job_id}` → status/progress/result
+- `GET /api/jobs/{job_id}/events` → SSE stream of events
+- `POST /api/jobs/{job_id}/cancel` → best-effort cancellation
+
+Example:
+
+```bash
+# Create a job
+curl -s -F "image=@data/input/rock-512.png" \
+  -F "positive_prompt=a photo" \
+  -F "steps=10" \
+  http://localhost:8000/api/jobs/img2img
+
+# Stream events
+curl -N http://localhost:8000/api/jobs/<job_id>/events
+```
+
 ## Troubleshooting
 
 ### Backend Crashes with "mutex lock failed" or Protobuf Warnings

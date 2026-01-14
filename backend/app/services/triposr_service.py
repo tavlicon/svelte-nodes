@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import asyncio
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -63,7 +64,7 @@ class TripoSRService:
     def __init__(self, output_dir: Path):
         self._artifacts = ArtifactPaths(output_dir)
 
-    async def run(
+    def run_sync(
         self,
         *,
         triposr_model: Any,
@@ -195,3 +196,19 @@ class TripoSRService:
             "faces": len(mesh.faces),
         }
 
+    async def run(
+        self,
+        *,
+        triposr_model: Any,
+        triposr_loaded: bool,
+        params: TripoSRParams,
+        image_bytes: bytes,
+    ) -> dict[str, Any]:
+        # Run heavy inference work off the event loop
+        return await asyncio.to_thread(
+            self.run_sync,
+            triposr_model=triposr_model,
+            triposr_loaded=triposr_loaded,
+            params=params,
+            image_bytes=image_bytes,
+        )

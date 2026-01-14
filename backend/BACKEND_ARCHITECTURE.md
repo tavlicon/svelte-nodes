@@ -18,6 +18,14 @@ The Phase_0 “safe refactor” has been **executed** (not just planned) on the 
 - `backend/app/services/triposr_service.py`: TripoSR orchestration extracted from `server.py`
 - `backend/app/runtime/concurrency.py`: per-model semaphores (default 1 in-flight per model)
 
+## Phase_1 job-based API status (executed on this branch)
+
+Phase_1 has been implemented in a **local-first** way (Option A):
+
+- Adds a **job queue** and **job API** under `/api/jobs/*` so work can be queued and progress streamed via SSE.
+- Keeps existing endpoints working; legacy endpoints now **delegate to the job system**.
+- Introduces a provider seam (`backend/app/services/providers/*`) to support future **new local models** and **vendor APIs** (e.g. Nano Banana) without rewriting the job engine.
+
 ## High-level data flow
 
 ```mermaid
@@ -103,7 +111,8 @@ The model loader:
 
 All endpoints are implemented in `backend/server.py`.
 
-Phase_0 note: handlers now **delegate** to `backend/app/services/*` for SD and TripoSR orchestration, but the endpoints and response shapes are intended to remain the same.
+Phase notes:
+- Phase_0: handlers delegate to `backend/app/services/*` for SD and TripoSR orchestration.\n+- Phase_1: handlers delegate to an in-process job system; endpoints and response shapes are intended to remain the same.
 
 ### Health and model status
 
@@ -144,13 +153,20 @@ Phase_0 note: handlers now **delegate** to `backend/app/services/*` for SD and T
   - Also attempts a preview PNG via `trimesh.Scene.save_image()`
   - Returns URLs under `/data/output/...` and mesh stats.
 
+### Phase_1 job endpoints (new)
+
+- `POST /api/jobs/img2img` → `{ job_id, status }` (multipart: same params as `/api/img2img`)
+- `POST /api/jobs/triposr` → `{ job_id, status }` (multipart: same params as `/api/triposr`)
+- `GET /api/jobs/{job_id}` → job status + progress + result/error
+- `GET /api/jobs/{job_id}/events` → SSE events (`queued`, `started`, `progress`, `completed`, `failed`, `cancelled`)
+- `POST /api/jobs/{job_id}/cancel` → best-effort cancellation (queued jobs cancel immediately; running cancel is best-effort)
+
 ## Concurrency + scaling implications (current)
 
-The backend is partially structured for multi-user concurrency (Phase_0):
+The backend is structured for multi-user concurrency (Phase_0 + Phase_1):
 
 - Uses **global mutable state** (`pipeline`, `triposr_model`, `model_loaded`, `triposr_loaded`, `current_device`).
-- Runs heavy compute **inline in request handlers**; on typical uvicorn setups, this will reduce effective concurrency and can increase tail latency.
-- **Now includes per-model semaphores** in `backend/app/runtime/concurrency.py` to reduce GPU/MPS contention:
+- Phase_1 runs heavy compute in background workers and uses **in-memory queueing** to avoid tying up the event loop.\n+- Includes per-model semaphores in `backend/app/runtime/concurrency.py` to reduce GPU/MPS contention:
   - SD img2img: 1 in-flight (default)
   - TripoSR: 1 in-flight (default)
 - Artifact URLs assume a separate file server exists (`/data/*`).

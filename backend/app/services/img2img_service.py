@@ -81,6 +81,7 @@ class Img2ImgService:
         params: Img2ImgParams,
         input_image: Image.Image,
         current_device: Optional[str] = None,
+        progress_callback: Optional[Any] = None,
     ) -> dict[str, Any]:
         if not model_loaded or pipeline is None:
             raise RuntimeError("Model not loaded")
@@ -106,7 +107,7 @@ class Img2ImgService:
 
         # Scheduler is set by caller for now (keeps mapping centralized in server.py)
         start_time = time.time()
-        result = pipeline(
+        pipeline_kwargs: dict[str, Any] = dict(
             prompt=params.positive_prompt,
             negative_prompt=params.negative_prompt,
             image=image,
@@ -115,6 +116,11 @@ class Img2ImgService:
             guidance_scale=params.cfg,
             generator=generator,
         )
+        if progress_callback is not None:
+            pipeline_kwargs["callback"] = progress_callback
+            pipeline_kwargs["callback_steps"] = 1
+
+        result = pipeline(**pipeline_kwargs)
         elapsed = time.time() - start_time
 
         output_image = result.images[0]
