@@ -32,6 +32,7 @@ from app.runtime.device import get_device_and_dtype as _get_device_and_dtype
 from app.storage.artifacts import ArtifactPaths
 from app.services.img2img_service import Img2ImgService, Img2ImgParams
 from app.services.triposr_service import TripoSRService, TripoSRParams
+from app.runtime.concurrency import ConcurrencyManager
 
 # Configure logging
 logging.basicConfig(
@@ -62,6 +63,7 @@ from transformers import CLIPTextModel, CLIPTokenizer
 app = FastAPI(title="Generative Design Studio Backend", version="1.0.0")
 
 SETTINGS = load_settings()
+CONCURRENCY = ConcurrencyManager()
 
 # CORS for frontend
 app.add_middleware(
@@ -437,22 +439,23 @@ async def img2img(
 
         logger.info("🚀 Starting inference...")
         svc = Img2ImgService(SETTINGS.output_dir)
-        result = svc.run(
-            pipeline=pipeline,
-            model_loaded=model_loaded,
-            params=Img2ImgParams(
-                positive_prompt=positive_prompt,
-                negative_prompt=negative_prompt,
-                seed=seed,
-                steps=steps,
-                cfg=cfg,
-                sampler_name=sampler_name,
-                scheduler=scheduler,
-                denoise=denoise,
-            ),
-            input_image=input_image,
-            current_device=current_device,
-        )
+        async with CONCURRENCY.sd_img2img:
+            result = svc.run(
+                pipeline=pipeline,
+                model_loaded=model_loaded,
+                params=Img2ImgParams(
+                    positive_prompt=positive_prompt,
+                    negative_prompt=negative_prompt,
+                    seed=seed,
+                    steps=steps,
+                    cfg=cfg,
+                    sampler_name=sampler_name,
+                    scheduler=scheduler,
+                    denoise=denoise,
+                ),
+                input_image=input_image,
+                current_device=current_device,
+            )
 
         logger.info(f"✅ Inference complete in {result['time_taken']:.2f}s")
         logger.info(f"  Output size: {result['width']}x{result['height']}")
@@ -912,22 +915,23 @@ async def generate_3d_mesh(
     try:
         image_data = await image.read()
         svc = TripoSRService(SETTINGS.output_dir)
-        result = await svc.run(
-            triposr_model=triposr_model,
-            triposr_loaded=triposr_loaded,
-            params=TripoSRParams(
-                foreground_ratio=foreground_ratio,
-                mc_resolution=mc_resolution,
-                remove_bg=remove_bg,
-                chunk_size=chunk_size,
-                bake_texture=bake_texture,
-                texture_resolution=texture_resolution,
-                render_video=render_video,
-                render_n_views=render_n_views,
-                render_resolution=render_resolution,
-            ),
-            image_bytes=image_data,
-        )
+        async with CONCURRENCY.triposr:
+            result = await svc.run(
+                triposr_model=triposr_model,
+                triposr_loaded=triposr_loaded,
+                params=TripoSRParams(
+                    foreground_ratio=foreground_ratio,
+                    mc_resolution=mc_resolution,
+                    remove_bg=remove_bg,
+                    chunk_size=chunk_size,
+                    bake_texture=bake_texture,
+                    texture_resolution=texture_resolution,
+                    render_video=render_video,
+                    render_n_views=render_n_views,
+                    render_resolution=render_resolution,
+                ),
+                image_bytes=image_data,
+            )
         logger.info("=" * 50)
         return result
         
