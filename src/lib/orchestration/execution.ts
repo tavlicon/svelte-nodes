@@ -33,6 +33,7 @@ interface ExecutionNode {
 class ExecutionEngine {
   private executionGraph: Map<string, ExecutionNode> = new Map();
   private running = false;
+  private cancelled = false;
   private queue: string[] = [];
   private callbacks: ExecutionCallbacks = {};
   
@@ -42,6 +43,26 @@ class ExecutionEngine {
    */
   setCallbacks(callbacks: ExecutionCallbacks) {
     this.callbacks = callbacks;
+  }
+  
+  /**
+   * Cancel the current execution immediately
+   * Aborts in-flight requests and stops execution
+   */
+  cancel() {
+    if (this.running) {
+      this.cancelled = true;
+      console.log('🛑 Execution cancellation requested - aborting in-flight requests');
+      // Immediately abort any in-flight inference requests
+      inferenceManager.cancelAll();
+    }
+  }
+  
+  /**
+   * Check if execution is currently running
+   */
+  isRunning(): boolean {
+    return this.running;
   }
   
   /**
@@ -170,9 +191,15 @@ class ExecutionEngine {
     
     console.log('Execution order:', order);
     this.running = true;
+    this.cancelled = false;
     
     try {
       for (const nodeId of order) {
+        // Check for cancellation before each node
+        if (this.cancelled) {
+          console.log('🛑 Execution cancelled by user');
+          return { success: false, error: 'Execution cancelled' };
+        }
         await this.executeNode(nodeId);
       }
       // #region agent log
@@ -180,6 +207,12 @@ class ExecutionEngine {
       // #endregion
       return { success: true };
     } catch (error) {
+      // Check if this was an abort/cancel
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('🛑 Execution aborted');
+        return { success: false, error: 'Execution cancelled' };
+      }
+      
       const errorMessage = error instanceof Error ? error.message : String(error);
       // #region agent log
       fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'execution.ts:execute',message:'Execution failed with error',data:{error:errorMessage},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
@@ -192,6 +225,7 @@ class ExecutionEngine {
       };
     } finally {
       this.running = false;
+      this.cancelled = false;
     }
   }
   

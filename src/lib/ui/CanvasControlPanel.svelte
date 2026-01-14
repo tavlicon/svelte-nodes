@@ -43,6 +43,9 @@
   let showErrorToast = $state(false);
   let errorToastTimeout: ReturnType<typeof setTimeout> | null = null;
   
+  // Cancel button visibility (for animation)
+  let showCancelButton = $state(false);
+  
   // Check backend status on mount
   $effect(() => {
     checkBackendStatus();
@@ -116,21 +119,30 @@
     }
     
     isExecuting = true;
+    showCancelButton = true;
     lastExecutionError = null;
     showErrorToast = false;
     
     try {
       const result = await executionEngine.execute();
       if (!result.success && result.error) {
-        lastExecutionError = result.error;
-        console.error('❌ Pipeline execution failed:', result.error);
+        // Don't show error if it was just cancelled
+        if (result.error !== 'Execution cancelled') {
+          lastExecutionError = result.error;
+          console.error('❌ Pipeline execution failed:', result.error);
+        }
       }
     } catch (error) {
       lastExecutionError = error instanceof Error ? error.message : String(error);
       console.error('❌ Pipeline execution error:', lastExecutionError);
     } finally {
       isExecuting = false;
+      showCancelButton = false;
     }
+  }
+  
+  function handleCancel() {
+    executionEngine.cancel();
   }
   
   function handleUndo() {
@@ -275,6 +287,20 @@
       <span>Generate</span>
     </button>
     
+    <!-- Cancel Button (shown when executing) -->
+    {#if showCancelButton}
+      <button 
+        class="icon-btn cancel-btn"
+        onclick={handleCancel}
+        title="Cancel generation"
+      >
+        <!-- X icon -->
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M18 6L6 18M6 6l12 12" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    {/if}
+    
     <!-- Divider -->
     <div class="divider"></div>
     
@@ -376,6 +402,8 @@
     background: rgb(5, 5, 5);
     border-radius: 100px;
     box-shadow: 0 6px 27px rgba(5, 5, 5, 0.24);
+    /* Smooth width transition when cancel button appears/disappears */
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
   }
   
   /* Generate Button - Volt green pill */
@@ -470,6 +498,31 @@
   .icon-btn svg {
     width: 24px;
     height: 24px;
+  }
+  
+  /* Cancel Button */
+  .cancel-btn {
+    animation: cancelFadeIn 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .cancel-btn:hover:not(:disabled) {
+    color: rgb(255, 100, 100);
+    background: rgba(255, 100, 100, 0.15);
+  }
+  
+  @keyframes cancelFadeIn {
+    from {
+      opacity: 0;
+      transform: scale(0.8);
+      width: 0;
+      margin: 0;
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+      width: 32px;
+      margin: 0;
+    }
   }
   
   /* Zoom Dropdown */

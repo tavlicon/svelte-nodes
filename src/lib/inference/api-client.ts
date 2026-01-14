@@ -154,7 +154,8 @@ export async function imageUrlToBlob(url: string): Promise<Blob> {
  */
 export async function runImg2ImgBackend(
   request: Img2ImgRequest,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal
 ): Promise<InferenceResult> {
   const startTime = performance.now();
   
@@ -183,7 +184,7 @@ export async function runImg2ImgBackend(
     
     // Use SSE endpoint for progress updates
     if (onProgress) {
-      return runImg2ImgWithProgress(formData, onProgress, startTime);
+      return runImg2ImgWithProgress(formData, onProgress, startTime, signal);
     }
     
     // Simple request without progress
@@ -191,6 +192,7 @@ export async function runImg2ImgBackend(
     const response = await fetch(`${BACKEND_URL}/api/img2img`, {
       method: 'POST',
       body: formData,
+      signal,
     });
     
     console.log('📬 Response status:', response.status);
@@ -246,7 +248,8 @@ export async function runImg2ImgBackend(
 async function runImg2ImgWithProgress(
   formData: FormData,
   onProgress: ProgressCallback,
-  startTime: number
+  startTime: number,
+  signal?: AbortSignal
 ): Promise<InferenceResult> {
   // Simulate progress updates while waiting
   let currentStep = 0;
@@ -279,6 +282,7 @@ async function runImg2ImgWithProgress(
     const response = await fetch(`${BACKEND_URL}/api/img2img`, {
       method: 'POST',
       body: formData,
+      signal,
     });
     
     if (!response.ok) {
@@ -375,7 +379,8 @@ export async function loadTripoSRModel(): Promise<boolean> {
  */
 export async function runTripoSRBackend(
   request: TripoSRRequest,
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  signal?: AbortSignal
 ): Promise<TripoSRResult> {
   console.log('🔺 Starting TripoSR request');
   console.log('  Input image:', request.inputImage.substring(0, 50) + '...');
@@ -436,6 +441,7 @@ export async function runTripoSRBackend(
     const response = await fetch(`${BACKEND_URL}/api/triposr`, {
       method: 'POST',
       body: formData,
+      signal,
     });
     
     console.log('📬 Response status:', response.status);

@@ -27,8 +27,40 @@ class InferenceManager {
   // Fallback handler for when backend is not available
   private fallbackHandler = new FallbackHandler();
   
+  // AbortController for cancelling in-flight requests
+  private abortController: AbortController | null = null;
+  
   constructor() {
     this.refreshStatus();
+  }
+  
+  /**
+   * Get an abort signal for the current operation
+   * Creates a new AbortController if needed
+   */
+  private getAbortSignal(): AbortSignal {
+    if (!this.abortController) {
+      this.abortController = new AbortController();
+    }
+    return this.abortController.signal;
+  }
+  
+  /**
+   * Cancel all in-flight inference requests immediately
+   */
+  cancelAll(): void {
+    if (this.abortController) {
+      console.log('🛑 Cancelling all inference requests');
+      this.abortController.abort();
+      this.abortController = null;
+    }
+  }
+  
+  /**
+   * Reset the abort controller for a new operation
+   */
+  resetAbort(): void {
+    this.abortController = new AbortController();
   }
   
   /**
@@ -71,9 +103,13 @@ class InferenceManager {
     console.log('  Model loaded:', this.modelLoaded);
     console.log('  Status:', status);
     
+    // Reset abort controller for new operation
+    this.resetAbort();
+    const signal = this.getAbortSignal();
+    
     if (this.backendAvailable && this.modelLoaded) {
       console.log('✅ Using Python backend for inference');
-      return runImg2ImgBackend(request, onProgress);
+      return runImg2ImgBackend(request, onProgress, signal);
     } else {
       console.warn('⚠️ Backend not ready, using simulation mode');
       console.warn('  Reason:', !this.backendAvailable ? 'Backend unavailable' : 'Model not loaded');
@@ -156,9 +192,13 @@ class InferenceManager {
       throw new Error('Backend not available. Please start the Python backend server.');
     }
     
+    // Reset abort controller for new operation
+    this.resetAbort();
+    const signal = this.getAbortSignal();
+    
     // TripoSR runs on backend only (no fallback)
     console.log('✅ Using Python backend for TripoSR inference');
-    return runTripoSRBackend(request, onProgress);
+    return runTripoSRBackend(request, onProgress, signal);
   }
   
   isTripoSRAvailable(): boolean {
