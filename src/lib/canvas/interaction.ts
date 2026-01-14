@@ -199,3 +199,62 @@ export function getNodesInRect(
   
   return selected;
 }
+
+// Selection rectangle helper for edges
+export function getEdgesInRect(
+  x1: number, y1: number,
+  x2: number, y2: number,
+  edges: Map<string, Edge>,
+  nodes: Map<string, NodeInstance>
+): string[] {
+  const minX = Math.min(x1, x2);
+  const maxX = Math.max(x1, x2);
+  const minY = Math.min(y1, y2);
+  const maxY = Math.max(y1, y2);
+  
+  const selected: string[] = [];
+  
+  for (const [edgeId, edge] of edges) {
+    const sourceNode = nodes.get(edge.sourceNodeId);
+    const targetNode = nodes.get(edge.targetNodeId);
+    
+    if (!sourceNode || !targetNode) continue;
+    
+    // Get edge endpoints
+    const x0 = sourceNode.x + sourceNode.width;
+    const y0 = sourceNode.y + sourceNode.height / 2;
+    const x3 = targetNode.x;
+    const y3 = targetNode.y + targetNode.height / 2;
+    
+    // Bezier control points
+    const dx = Math.abs(x3 - x0) * 0.5;
+    const x1b = x0 + dx;
+    const y1b = y0;
+    const x2b = x3 - dx;
+    const y2b = y3;
+    
+    // Sample the curve and check if any point is in rect
+    const samples = 16;
+    let intersects = false;
+    
+    for (let i = 0; i < samples && !intersects; i++) {
+      const t = i / (samples - 1);
+      const point = evaluateBezier(t, x0, y0, x1b, y1b, x2b, y2b, x3, y3);
+      
+      if (
+        point.x >= minX &&
+        point.x <= maxX &&
+        point.y >= minY &&
+        point.y <= maxY
+      ) {
+        intersects = true;
+      }
+    }
+    
+    if (intersects) {
+      selected.push(edgeId);
+    }
+  }
+  
+  return selected;
+}

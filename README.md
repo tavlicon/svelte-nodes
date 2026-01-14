@@ -71,9 +71,25 @@ npm install
 
 ### 2. Set Up Python Backend
 
+**Option A: Use the start script (recommended)**
+
 ```bash
 cd backend
-python3 -m venv venv
+./start.sh
+```
+
+The script automatically handles conda conflicts and venv setup.
+
+**Option B: Manual setup**
+
+> ⚠️ **Important**: If you have conda/miniconda installed, you MUST deactivate it first to prevent library conflicts that cause crashes.
+
+```bash
+# Deactivate conda if active (critical!)
+conda deactivate
+
+cd backend
+python3.10 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
@@ -127,7 +143,17 @@ Download from HuggingFace:
 
 ### 4. Start the Backend
 
+**Recommended (handles conda conflicts automatically):**
 ```bash
+cd backend
+./start.sh
+```
+
+**Manual (if start.sh doesn't work):**
+```bash
+# IMPORTANT: Deactivate conda first if you have it installed!
+conda deactivate
+
 cd backend
 source venv/bin/activate
 python server.py
@@ -135,8 +161,10 @@ python server.py
 
 The server will start on `http://localhost:8000` and show:
 ```
-✅ Model loaded successfully (offline mode)!
-Backend: MPS | Model: v1-5-pruned-emaonly-fp16
+🚀 Starting Stable Diffusion Backend Server
+📍 Mode: LOCAL ONLY (no network calls)
+✅ Model loaded successfully!
+Using device: mps
 ```
 
 ### 5. Start the Frontend
@@ -316,6 +344,27 @@ Returns:
 
 ## Troubleshooting
 
+### Backend Crashes with "mutex lock failed" or Protobuf Warnings
+
+If you see errors like:
+```
+/Users/.../miniconda3/lib/python3.10/site-packages/google/protobuf/...
+libc++abi: terminating due to uncaught exception of type std::__1::system_error: mutex lock failed
+```
+
+**Cause**: Conda's global packages (TensorFlow, protobuf) are conflicting with the venv's PyTorch packages.
+
+**Solution**: Fully deactivate conda before starting the backend:
+```bash
+# Deactivate conda (may need to run multiple times)
+conda deactivate
+
+# Or use the start script which handles this automatically
+./start.sh
+```
+
+**Prevention**: Always start from a fresh terminal or deactivate conda first.
+
 ### 403 WebSocket Errors in Terminal
 
 ```
@@ -356,6 +405,12 @@ If frontend shows "SIMULATION" instead of "MPS/CUDA":
 2. Ensure DINO encoder is in `data/models/dino-vitb16/`
 3. Check backend logs for: `✅ TripoSR model loaded`
 4. Test endpoint: `curl http://localhost:8000/api/triposr/info`
+
+If you see `ModuleNotFoundError: No module named 'onnxruntime'`:
+```bash
+source venv/bin/activate
+pip install onnxruntime
+```
 
 ### 3D Preview Not Showing
 

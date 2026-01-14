@@ -4,7 +4,7 @@
   import { cubicOut } from 'svelte/easing';
   import { CanvasRenderer } from '../canvas/renderer';
   import { Canvas2DRenderer } from '../canvas/renderer-2d';
-  import { getNodesInRect } from '../canvas/interaction';
+  import { getNodesInRect, getEdgesInRect } from '../canvas/interaction';
   import { graphStore, getNodesVersion } from '../graph/store.svelte';
   import { executionEngine } from '../orchestration/execution';
   import { theme } from './theme.svelte';
@@ -22,6 +22,7 @@
   import { generateGLBThumbnail } from './glb-thumbnail';
   import { getDOMNodeRadius, getDOMBorderWidth, MIN_ZOOM, MAX_ZOOM } from '../canvas/node-style';
   import MeshViewer from './MeshViewer.svelte';
+  import CanvasMenu from './CanvasMenu.svelte';
   
   // Renderer interface
   interface IRenderer {
@@ -105,6 +106,12 @@
   let reconnectingEdgeId = $state<string | null>(null);
   let reconnectingEndpoint = $state<'source' | 'target' | null>(null);
   let reconnectFixedEnd = $state<{ x: number; y: number } | null>(null);
+  
+  // Canvas menu state (for connector icon click)
+  let menuOpen = $state(false);
+  let menuPosition = $state<{ x: number; y: number }>({ x: 0, y: 0 });
+  let menuSourceNodeId = $state<string | null>(null);
+  let menuSourcePortType = $state<'image' | 'mesh'>('image');
   
   // Default node size for image resizing
   const NODE_SIZE = 200;
@@ -541,7 +548,7 @@
       return;
     }
     
-    if (e.code === 'Space' && !spacePressed) {
+    if (e.code === 'Space' && !spacePressed && !isInInput) {
       spacePressed = true;
       e.preventDefault();
     }
@@ -578,6 +585,12 @@
     e.preventDefault();
     canvasElement.focus();
     
+    // Close menu and block interactions when clicking canvas while menu open
+    if (menuOpen) {
+      handleMenuClose();
+      return;
+    }
+    
     const rect = canvasElement.getBoundingClientRect();
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
@@ -587,7 +600,7 @@
     const world = screenToWorld(screenX, screenY, viewWidth, viewHeight);
     
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    canvasElement.setPointerCapture(e.pointerId);
+    containerElement.setPointerCapture(e.pointerId);
     marqueeStartWorld = null;
     marqueeStartScreen = null;
     marqueeCurrentWorld = null;
@@ -738,6 +751,20 @@
   function handlePointerMove(e: PointerEvent) {
     if (!activePointers.has(e.pointerId)) return;
     
+    // Handle connector icon drag (detect threshold to start connection)
+    if (connectorDragStart && connectionStart && !isConnecting) {
+      const dx = e.clientX - connectorDragStart.x;
+      const dy = e.clientY - connectorDragStart.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance > DRAG_THRESHOLD) {
+        // Start connection mode
+        isConnecting = true;
+        graphStore.deselectAll();
+      }
+      return; // Don't process other move logic until drag threshold exceeded
+    }
+    
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     
     const rect = canvasElement.getBoundingClientRect();
@@ -860,12 +887,13 @@
       }
     }
     
-    // Update marquee selection live
+    // Update marquee selection live (nodes and edges)
     if (mode === 'marquee' && marqueeStartWorld) {
       marqueeCurrentScreen = { x: screenX, y: screenY };
       marqueeCurrentWorld = screenToWorld(screenX, screenY, viewWidth, viewHeight);
       
-      const ids = getNodesInRect(
+      // Select nodes in rect
+      const nodeIds = getNodesInRect(
         marqueeStartWorld.x,
         marqueeStartWorld.y,
         marqueeCurrentWorld.x,
@@ -873,9 +901,22 @@
         graphStore.nodes
       );
       
-      const newSelection = marqueeAdditive ? new Set(initialSelection) : new Set<string>();
-      ids.forEach(id => newSelection.add(id));
-      graphStore.selectedNodeIds = newSelection;
+      // Select edges in rect
+      const edgeIds = getEdgesInRect(
+        marqueeStartWorld.x,
+        marqueeStartWorld.y,
+        marqueeCurrentWorld.x,
+        marqueeCurrentWorld.y,
+        graphStore.edges,
+        graphStore.nodes
+      );
+      
+      const newNodeSelection = marqueeAdditive ? new Set(initialSelection) : new Set<string>();
+      nodeIds.forEach(id => newNodeSelection.add(id));
+      graphStore.selectedNodeIds = newNodeSelection;
+      
+      // For edges, we don't track initial edge selection for additive mode currently
+      graphStore.selectedEdgeIds = new Set(edgeIds);
       return;
     }
     
@@ -897,7 +938,36 @@
   
   function handlePointerUp(e: PointerEvent) {
     activePointers.delete(e.pointerId);
-    canvasElement.releasePointerCapture(e.pointerId);
+    containerElement.releasePointerCapture(e.pointerId);
+    
+    // Handle connector icon click (didn't drag far enough to start connection)
+    if (connectorDragStart && !isConnecting) {
+      const dx = e.clientX - connectorDragStart.x;
+      const dy = e.clientY - connectorDragStart.y;
+      const distance = Math.sqrt(dx * dx + dy * dy);
+      
+      if (distance <= DRAG_THRESHOLD) {
+        // It was a click - open the menu
+        const node = graphStore.getNodeById(connectorDragStart.nodeId);
+        if (node) {
+          const rect = containerElement.getBoundingClientRect();
+          menuPosition = { 
+            x: e.clientX - rect.left + 8, 
+            y: e.clientY - rect.top - 28
+          };
+          menuSourceNodeId = connectorDragStart.nodeId;
+          menuSourcePortType = connectorDragStart.portType;
+          menuOpen = true;
+          graphStore.deselectAll();
+        }
+      }
+      
+      // Clean up connector state
+      connectorDragStart = null;
+      connectionStart = null;
+      connectionEndWorld = null;
+      return;
+    }
     
     // Complete connection
     if (isConnecting && connectionStart) {
@@ -911,7 +981,8 @@
         graphStore.addEdge(sourceNodeId, sourcePortId, targetNodeId, targetPortId);
       }
       
-      // Reset connection state
+      // Reset connection state (including connector state if it was a connector-initiated drag)
+      connectorDragStart = null;
       isConnecting = false;
       connectionStart = null;
       connectionEndWorld = null;
@@ -1042,6 +1113,9 @@
   function handleWheel(e: WheelEvent) {
     e.preventDefault();
     
+    // Block zoom/pan when menu is open
+    if (menuOpen) return;
+    
     // Use the same rect for mouse position and dimensions
     const rect = canvasElement.getBoundingClientRect();
     const mouseX = e.clientX - rect.left;
@@ -1102,34 +1176,175 @@
     // Don't clear hoveredNodeId here - let handleMouseMove handle it
   }
   
+  // Track connector drag state for distinguishing click vs drag
+  let connectorDragStart = $state<{ x: number; y: number; nodeId: string; portType: 'image' | 'mesh' } | null>(null);
+  const DRAG_THRESHOLD = 5; // pixels - if moved more than this, it's a drag, not a click
+  
   /**
-   * Handle clicking on the connector icon to start a connection
+   * Handle pointer down on connector icon - prepares for either drag (connection) or click (menu)
    */
-  function handleConnectorMouseDown(e: MouseEvent | PointerEvent, nodeId: string, portId: string = 'image') {
+  function handleConnectorPointerDown(e: PointerEvent, nodeId: string, portType: 'image' | 'mesh' = 'image') {
     e.preventDefault();
     e.stopPropagation();
     
     const node = graphStore.getNodeById(nodeId);
     if (!node) return;
     
-    // Get the port position for this node's output
+    // Store starting position to detect drag vs click
+    connectorDragStart = { x: e.clientX, y: e.clientY, nodeId, portType };
+    
+    // Capture pointer on container element so we receive move/up events
+    // (connector icon and container are siblings, events don't naturally bubble)
+    containerElement.setPointerCapture(e.pointerId);
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    
+    // Get output port position for potential connection start
     const portPositions = getPortPositions(node);
-    const outputPort = portPositions.find(p => p.isOutput && p.portId === portId);
+    const portId = portType === 'mesh' ? 'mesh' : 'image';
+    const outputPort = portPositions.find(p => p.portId === portId && p.isOutput);
     
     if (outputPort) {
-      isConnecting = true;
+      // Prepare connection start (but don't activate until drag detected)
       connectionStart = outputPort;
       connectionEndWorld = { x: outputPort.x, y: outputPort.y };
-      isOverConnectorIcon = null; // Clear so we can drag properly
-      graphStore.deselectAll();
-      
-      // IMPORTANT: Add pointer to activePointers so handlePointerMove processes the drag
-      // This is needed because the click originated from the connector icon, not the canvas
-      if (e instanceof PointerEvent && canvasElement) {
-        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-        canvasElement.setPointerCapture(e.pointerId);
-      }
     }
+  }
+  
+  /**
+   * Handle click on connector icon - opens menu (fallback for environments where pointerdown/up don't work as expected)
+   */
+  function handleConnectorClick(e: MouseEvent, nodeId: string, portType: 'image' | 'mesh' = 'image') {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // If connection mode was started (drag exceeded threshold), skip - let handlePointerUp handle it
+    if (isConnecting) {
+      return;
+    }
+    
+    // Clear any pending connector drag state (in case pointerdown was triggered but not handled properly)
+    if (connectorDragStart) {
+      connectorDragStart = null;
+      connectionStart = null;
+      connectionEndWorld = null;
+    }
+    
+    const node = graphStore.getNodeById(nodeId);
+    if (!node) return;
+    
+    const rect = containerElement.getBoundingClientRect();
+    menuPosition = { 
+      x: e.clientX - rect.left + 8, 
+      y: e.clientY - rect.top - 28
+    };
+    menuSourceNodeId = nodeId;
+    menuSourcePortType = portType;
+    menuOpen = true;
+    isOverConnectorIcon = null;
+    graphStore.deselectAll();
+  }
+  
+  /**
+   * Clean up all connector drag state
+   */
+  function cleanupConnectorDrag() {
+    connectorDragStart = null;
+    connectionStart = null;
+    connectionEndWorld = null;
+    isConnecting = false;
+    snapTarget = null;
+    isOverConnectorIcon = null;
+  }
+  
+  function handleMenuClose() {
+    menuOpen = false;
+    menuSourceNodeId = null;
+  }
+  
+  function handleMenuSelect(nodeType: string) {
+    if (!menuSourceNodeId) {
+      handleMenuClose();
+      return;
+    }
+    
+    const sourceNode = graphStore.getNodeById(menuSourceNodeId);
+    if (!sourceNode) {
+      handleMenuClose();
+      return;
+    }
+    
+    // Calculate position for new node (to the right of source node with gap)
+    const gap = 60;
+    const newX = sourceNode.x + sourceNode.width + gap;
+    
+    // Find existing model/triposr nodes to the right of the source to stack below them
+    const modelNodeTypes = ['model', 'triposr'];
+    const existingModelNodes = Array.from(graphStore.nodes.values())
+      .filter(n => modelNodeTypes.includes(n.type))
+      .filter(n => n.x >= sourceNode.x + sourceNode.width) // To the right of source
+      .sort((a, b) => (a.y + (a.height || NODE_SIZE)) - (b.y + (b.height || NODE_SIZE))); // Sort by bottom edge
+    
+    // Calculate Y position - align with source or stack below existing model nodes
+    let newY: number;
+    if (existingModelNodes.length === 0) {
+      // First model node - align vertically with source node center
+      newY = sourceNode.y + (sourceNode.height / 2) - (NODE_SIZE / 2);
+    } else {
+      // Stack below the lowest existing model node
+      const lowestNode = existingModelNodes[existingModelNodes.length - 1];
+      const lowestNodeHeight = lowestNode.height || NODE_SIZE;
+      newY = lowestNode.y + lowestNodeHeight + 50; // 50px gap to account for node labels
+    }
+    
+    let newNodeId: string;
+    
+    if (nodeType === 'triposr') {
+      // Create TripoSR node
+      newNodeId = graphStore.addNode(
+        'triposr',
+        newX,
+        newY,
+        {},
+        NODE_SIZE,
+        NODE_SIZE
+      );
+    } else if (nodeType === 'model') {
+      // Create SD 1.5 img2img model node
+      newNodeId = graphStore.addNode(
+        'model',
+        newX,
+        newY,
+        {
+          modelPath: '/data/models/v1-5-pruned-emaonly-fp16.safetensors',
+          modelName: 'SD 1.5',
+          modelType: 'safetensors',
+        },
+        NODE_SIZE,
+        NODE_SIZE
+      );
+    } else {
+      handleMenuClose();
+      return;
+    }
+    
+    // Create edge from source node output to new node input
+    const sourcePortId = menuSourcePortType === 'mesh' ? 'mesh' : 'image';
+    const targetPortId = menuSourcePortType === 'mesh' ? 'mesh' : 'image';
+    graphStore.addEdge(menuSourceNodeId, sourcePortId, newNodeId, targetPortId);
+    
+    // Track for fade-in animation
+    newlyAddedNodeIds = new Set(newlyAddedNodeIds).add(newNodeId);
+    setTimeout(() => {
+      const updated = new Set(newlyAddedNodeIds);
+      updated.delete(newNodeId);
+      newlyAddedNodeIds = updated;
+    }, 100);
+    
+    // Select the new node
+    graphStore.selectNode(newNodeId, false);
+    
+    // Close the menu
+    handleMenuClose();
   }
   
   function handleMouseMove(e: MouseEvent) {
@@ -2159,21 +2374,21 @@
   ondragover={handleDragOver}
   ondragleave={handleDragLeave}
   ondrop={handleDrop}
+  onpointerdown={handlePointerDown}
+  onpointermove={handlePointerMove}
+  onpointerup={handlePointerUp}
+  onpointercancel={handlePointerCancel}
+  onpointerleave={handlePointerCancel}
+  onwheel={handleWheel}
+  oncontextmenu={handleContextMenu}
+  ondblclick={handleDoubleClick}
+  onmousemove={handleMouseMove}
+  onmouseleave={handleMouseLeave}
 >
   <canvas
     bind:this={canvasElement}
     class={cursorClass}
     tabindex="0"
-    onpointerdown={handlePointerDown}
-    onpointermove={handlePointerMove}
-    onpointerup={handlePointerUp}
-    onpointercancel={handlePointerCancel}
-    onpointerleave={handlePointerCancel}
-    onwheel={handleWheel}
-    oncontextmenu={handleContextMenu}
-    ondblclick={handleDoubleClick}
-    onmousemove={handleMouseMove}
-    onmouseleave={handleMouseLeave}
   ></canvas>
   
   <!-- Image nodes rendered as DOM overlays -->
@@ -2223,7 +2438,8 @@
           class:visible={img.isHovered}
           class:dragging={isConnecting && connectionStart?.nodeId === img.id}
           style={`height: ${img.screenHeight}px;`}
-          onpointerdown={(e) => handleConnectorMouseDown(e, img.id, 'image')}
+          onpointerdown={(e) => handleConnectorPointerDown(e, img.id, 'image')}
+          onclick={(e) => handleConnectorClick(e, img.id, 'image')}
           onmouseenter={() => handleConnectorMouseEnter(img.id)}
           onmouseleave={handleConnectorMouseLeave}
           role="button"
@@ -2365,7 +2581,8 @@
           class:visible={output.isHovered}
           class:dragging={isConnecting && connectionStart?.nodeId === output.id}
           style={`height: ${output.screenHeight}px;`}
-          onpointerdown={(e) => handleConnectorMouseDown(e, output.id, 'image')}
+          onpointerdown={(e) => handleConnectorPointerDown(e, output.id, 'image')}
+          onclick={(e) => handleConnectorClick(e, output.id, 'image')}
           onmouseenter={() => handleConnectorMouseEnter(output.id)}
           onmouseleave={handleConnectorMouseLeave}
           role="button"
@@ -2483,7 +2700,8 @@
           class:visible={meshNode.isHovered}
           class:dragging={isConnecting && connectionStart?.nodeId === meshNode.id}
           style={`height: ${meshNode.screenHeight}px;`}
-          onpointerdown={(e) => handleConnectorMouseDown(e, meshNode.id, 'mesh')}
+          onpointerdown={(e) => handleConnectorPointerDown(e, meshNode.id, 'mesh')}
+          onclick={(e) => handleConnectorClick(e, meshNode.id, 'mesh')}
           onmouseenter={() => handleConnectorMouseEnter(meshNode.id)}
           onmouseleave={handleConnectorMouseLeave}
           role="button"
@@ -2580,6 +2798,16 @@
       <div class="drop-icon">📷</div>
       <div class="drop-text">Drop image here</div>
     </div>
+  {/if}
+  
+  {#if menuOpen}
+    <CanvasMenu
+      x={menuPosition.x}
+      y={menuPosition.y}
+      sourcePortType={menuSourcePortType}
+      onselect={handleMenuSelect}
+      onclose={handleMenuClose}
+    />
   {/if}
 </div>
 
@@ -2751,7 +2979,7 @@
   /* Image node wrapper - contains image + connector + filename */
   .image-node-wrapper {
     position: absolute;
-    z-index: 1;
+    z-index: 20; /* Above connection-line-overlay (z-index: 15) so connector icon is clickable */
     pointer-events: none;
     background: transparent;
     will-change: left, top, width, height; /* GPU hint for smooth animations */
@@ -2922,7 +3150,7 @@
   /* Model node wrapper - contains model + error tooltip */
   .model-node-wrapper {
     position: absolute;
-    z-index: 1;
+    z-index: 20; /* Above connection-line-overlay (z-index: 15) so connector icon is clickable */
     pointer-events: none;
     background: transparent;
     will-change: left, top, width, height; /* GPU hint for smooth animations */
