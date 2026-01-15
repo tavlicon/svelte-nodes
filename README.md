@@ -80,6 +80,11 @@ cd backend
 
 The script automatically handles conda conflicts and venv setup.
 
+### Backend start notes (important)
+
+- Prefer starting the backend via `./start.sh` (or `npm run backend`) to avoid Conda/PyTorch/Protobuf conflicts that can crash with errors like `mutex lock failed`.
+- Avoid running `python server.py` from a Conda environment.
+
 **Option B: Manual setup**
 
 > ⚠️ **Important**: If you have conda/miniconda installed, you MUST deactivate it first to prevent library conflicts that cause crashes.
@@ -93,6 +98,27 @@ python3.10 -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
+
+### 4. Run the frontend + backend locally
+
+Open two terminals:
+
+```bash
+# Terminal A (frontend)
+npm run dev
+```
+
+```bash
+# Terminal B (backend)
+cd backend
+./start.sh
+```
+
+### Do I need to stop and restart servers?
+
+- **For README-only changes**: no.
+- **After pulling new backend code**: yes—restart the backend process so it uses the updated Python files.
+- **After pulling frontend code**: usually no (Vite HMR), but restart if the dev server gets into a weird state.
 
 ### 3. Download Model Files (Offline Setup)
 
