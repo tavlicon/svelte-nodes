@@ -3,6 +3,10 @@ from __future__ import annotations
 import io
 import asyncio
 import time
+import json
+import os
+import platform
+import resource
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -72,6 +76,39 @@ class TripoSRService:
         params: TripoSRParams,
         image_bytes: bytes,
     ) -> dict[str, Any]:
+        # region agent log
+        try:
+            debug_log_path = Path(os.getenv("DNA_DEBUG_LOG_PATH", str(Path(__file__).resolve().parents[3] / ".cursor" / "debug.log")))
+            debug_log_path.open("a").write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "run1",
+                "hypothesisId": "H1",
+                "location": "backend/app/services/triposr_service.py:TripoSRService.run_sync",
+                "message": "TripoSR run_sync start",
+                "data": {
+                    "imageBytes": len(image_bytes),
+                    "params": {
+                        "foreground_ratio": params.foreground_ratio,
+                        "mc_resolution": params.mc_resolution,
+                        "remove_bg": params.remove_bg,
+                        "chunk_size": params.chunk_size,
+                        "bake_texture": params.bake_texture,
+                        "texture_resolution": params.texture_resolution,
+                        "render_video": params.render_video,
+                        "render_n_views": params.render_n_views,
+                        "render_resolution": params.render_resolution
+                    },
+                    "platform": platform.platform(),
+                    "ru_maxrss": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                    "mps_allocated": (torch.mps.current_allocated_memory() if hasattr(torch, "mps") and torch.backends.mps.is_available() else None),
+                    "cuda_allocated": (torch.cuda.memory_allocated() if torch.cuda.is_available() else None),
+                },
+                "timestamp": int(time.time() * 1000)
+            }) + "\n")
+        except Exception:
+            pass
+        # endregion
+
         if not triposr_loaded or triposr_model is None:
             raise RuntimeError("TripoSR model not available")
 
@@ -103,6 +140,26 @@ class TripoSRService:
         # Inference
         with torch.no_grad():
             scene_codes = triposr_model([input_image], device=device)
+
+        # region agent log
+        try:
+            debug_log_path.open("a").write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "run1",
+                "hypothesisId": "H2",
+                "location": "backend/app/services/triposr_service.py:TripoSRService.run_sync",
+                "message": "TripoSR after scene_codes",
+                "data": {
+                    "sceneCodesShape": list(getattr(scene_codes, "shape", [])),
+                    "ru_maxrss": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                    "mps_allocated": (torch.mps.current_allocated_memory() if hasattr(torch, "mps") and torch.backends.mps.is_available() else None),
+                    "cuda_allocated": (torch.cuda.memory_allocated() if torch.cuda.is_available() else None),
+                },
+                "timestamp": int(time.time() * 1000)
+            }) + "\n")
+        except Exception:
+            pass
+        # endregion
 
         mesh_start = time.time()
         with torch.no_grad():
@@ -150,6 +207,28 @@ class TripoSRService:
         output_path = self._artifacts.mesh_path()
         mesh.export(str(output_path), file_type="glb")
 
+        # region agent log
+        try:
+            debug_log_path.open("a").write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "run1",
+                "hypothesisId": "H2",
+                "location": "backend/app/services/triposr_service.py:TripoSRService.run_sync",
+                "message": "TripoSR after mesh export",
+                "data": {
+                    "outputPath": str(output_path),
+                    "vertices": len(mesh.vertices),
+                    "faces": len(mesh.faces),
+                    "ru_maxrss": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                    "mps_allocated": (torch.mps.current_allocated_memory() if hasattr(torch, "mps") and torch.backends.mps.is_available() else None),
+                    "cuda_allocated": (torch.cuda.memory_allocated() if torch.cuda.is_available() else None),
+                },
+                "timestamp": int(time.time() * 1000)
+            }) + "\n")
+        except Exception:
+            pass
+        # endregion
+
         # Optional video
         video_url: Optional[str] = None
         video_time: float = 0.0
@@ -183,6 +262,26 @@ class TripoSRService:
             preview_url = None
 
         total_time = time.time() - start_time
+        # region agent log
+        try:
+            debug_log_path.open("a").write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "run1",
+                "hypothesisId": "H3",
+                "location": "backend/app/services/triposr_service.py:TripoSRService.run_sync",
+                "message": "TripoSR run_sync end",
+                "data": {
+                    "timeTaken": total_time,
+                    "ru_maxrss": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,
+                    "mps_allocated": (torch.mps.current_allocated_memory() if hasattr(torch, "mps") and torch.backends.mps.is_available() else None),
+                    "cuda_allocated": (torch.cuda.memory_allocated() if torch.cuda.is_available() else None),
+                },
+                "timestamp": int(time.time() * 1000)
+            }) + "\n")
+        except Exception:
+            pass
+        # endregion
+
         return {
             "status": "success",
             "mesh_path": f"/data/output/{output_path.name}",

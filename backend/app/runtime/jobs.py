@@ -5,6 +5,9 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
+import os
+import json
+from pathlib import Path
 
 JobType = Literal["img2img", "triposr"]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
@@ -146,6 +149,29 @@ class JobStore:
         rec.result = result
         rec.done.set()
         await self.emit(job_id, "completed", {"status": "succeeded", "result": result})
+        # region agent log
+        try:
+            debug_log_path = Path(os.getenv("DNA_DEBUG_LOG_PATH", str(Path(__file__).resolve().parents[3] / ".cursor" / "debug.log")))
+            # Approximate retained payload bytes (only counts raw image bytes)
+            img_bytes = rec.payload.get("image_bytes")
+            approx_payload = len(img_bytes) if isinstance(img_bytes, (bytes, bytearray)) else 0
+            debug_log_path.open("a").write(json.dumps({
+                "sessionId": "debug-session",
+                "runId": "run1",
+                "hypothesisId": "H4",
+                "location": "backend/app/runtime/jobs.py:JobStore.succeed",
+                "message": "Job succeeded",
+                "data": {
+                    "jobId": job_id,
+                    "jobType": rec.type,
+                    "approxPayloadBytes": approx_payload,
+                    "jobCount": len(self._jobs),
+                },
+                "timestamp": int(time.time() * 1000)
+            }) + "\n")
+        except Exception:
+            pass
+        # endregion
 
     async def fail(self, job_id: str, message: str) -> None:
         rec = await self.get(job_id)
