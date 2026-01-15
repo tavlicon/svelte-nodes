@@ -23,6 +23,13 @@ vi.mock('../../inference/manager', () => ({
       width: 512,
       height: 512,
     }),
+    runTripoSR: vi.fn().mockResolvedValue({
+      meshUrl: '/data/output/test_mesh.glb',
+      outputPath: '/data/output/test_mesh.glb',
+      timeTaken: 1200,
+      vertices: 1000,
+      faces: 2000,
+    }),
   },
 }));
 
@@ -163,19 +170,21 @@ describe('ExecutionEngine', () => {
       expect(modelNode?.error).toBe('GPU out of memory');
     });
 
-    it('reports missing input image error', async () => {
+    it('skips completely disconnected model node silently', async () => {
       const { graphStore } = await import('../../graph/store.svelte');
       const { executionEngine } = await import('../execution');
       
-      // Model node without connected image
+      // Model node with NO connections at all - should be skipped, not error
       const modelId = graphStore.addNode('model', 0, 0, {
         positive_prompt: 'test',
       });
       
       const result = await executionEngine.execute();
       
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('input image');
+      // Should succeed (disconnected nodes are skipped)
+      expect(result.success).toBe(true);
+      // Node should remain idle (not executed, not error)
+      expect(graphStore.getNodeById(modelId)?.status).toBe('idle');
     });
 
     it('reports missing prompt error', async () => {
@@ -323,6 +332,84 @@ describe('ExecutionEngine', () => {
       // Both should be complete again
       expect(graphStore.getNodeById(imageId)?.status).toBe('complete');
       expect(graphStore.getNodeById(modelId)?.status).toBe('complete');
+    });
+  });
+
+  // ===========================================================================
+  // Disconnected Nodes (skip vs error behavior)
+  // ===========================================================================
+  
+  describe('disconnected nodes', () => {
+    it('skips disconnected triposr node silently', async () => {
+      const { graphStore } = await import('../../graph/store.svelte');
+      const { executionEngine } = await import('../execution');
+      
+      // TripoSR node with NO connections - should be skipped
+      const triposrId = graphStore.addNode('triposr', 0, 0, {});
+      
+      const result = await executionEngine.execute();
+      
+      expect(result.success).toBe(true);
+      expect(graphStore.getNodeById(triposrId)?.status).toBe('idle');
+    });
+
+    it('only executes connected pipeline, ignores disconnected model nodes', async () => {
+      const { graphStore } = await import('../../graph/store.svelte');
+      const { executionEngine } = await import('../execution');
+      
+      // Connected pipeline: image -> model1
+      const imageId = graphStore.addNode('image', 0, 0, { imageUrl: '/test.png' });
+      const model1Id = graphStore.addNode('model', 200, 0, { positive_prompt: 'connected' });
+      graphStore.addEdge(imageId, 'image', model1Id, 'image');
+      
+      // Disconnected model (should be ignored completely)
+      const model2Id = graphStore.addNode('model', 400, 0, { positive_prompt: 'disconnected' });
+      
+      const result = await executionEngine.execute();
+      
+      expect(result.success).toBe(true);
+      expect(graphStore.getNodeById(model1Id)?.status).toBe('complete');
+      expect(graphStore.getNodeById(model2Id)?.status).toBe('idle'); // Skipped, not error
+    });
+
+    it('executes multiple independent pipelines', async () => {
+      const { graphStore } = await import('../../graph/store.svelte');
+      const { executionEngine } = await import('../execution');
+      
+      // Pipeline 1: image1 -> model1
+      const image1Id = graphStore.addNode('image', 0, 0, { imageUrl: '/test1.png' });
+      const model1Id = graphStore.addNode('model', 200, 0, { positive_prompt: 'pipeline1' });
+      graphStore.addEdge(image1Id, 'image', model1Id, 'image');
+      
+      // Pipeline 2: image2 -> triposr (separate pipeline)
+      const image2Id = graphStore.addNode('image', 0, 200, { imageUrl: '/test2.png' });
+      const triposrId = graphStore.addNode('triposr', 200, 200, {});
+      graphStore.addEdge(image2Id, 'image', triposrId, 'image');
+      
+      const result = await executionEngine.execute();
+      
+      expect(result.success).toBe(true);
+      expect(graphStore.getNodeById(model1Id)?.status).toBe('complete');
+      // Note: triposr may fail if backend not mocked, but image nodes should complete
+      expect(graphStore.getNodeById(image1Id)?.status).toBe('complete');
+      expect(graphStore.getNodeById(image2Id)?.status).toBe('complete');
+    });
+
+    it('errors when model has partial connections but missing image', async () => {
+      const { graphStore } = await import('../../graph/store.svelte');
+      const { executionEngine } = await import('../execution');
+      
+      // Model connected to prompt but NOT to image (has edges, but missing required image)
+      const promptId = graphStore.addNode('prompt', 0, 0, { text: 'test prompt' });
+      const modelId = graphStore.addNode('model', 200, 0, { positive_prompt: '' });
+      graphStore.addEdge(promptId, 'text', modelId, 'positive_prompt');
+      
+      const result = await executionEngine.execute();
+      
+      // Should error because model has connections but missing required image input
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('input image');
+      expect(graphStore.getNodeById(modelId)?.status).toBe('error');
     });
   });
 });

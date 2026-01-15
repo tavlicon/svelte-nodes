@@ -524,6 +524,46 @@ npm run build
 npm run preview
 ```
 
+## Testing
+
+The project uses [Vitest](https://vitest.dev/) for automated testing. Tests verify core functionality including the execution engine, node graph operations, and API clients.
+
+### Running Tests
+
+```bash
+# Watch mode (recommended during development)
+npm test
+
+# Single run (before committing)
+npm run test:run
+
+# With coverage report
+npm run test:coverage
+
+# Visual UI for exploring tests
+npm run test:ui
+```
+
+### Test Strategy
+
+| Mode | When to Use |
+|------|-------------|
+| `npm test` (watch) | During active development - tests re-run on file changes |
+| `npm run test:run` | Before committing - one-time verification |
+| CI/CD | On push/PR - catches regressions automatically |
+
+### Key Test Files
+
+- `src/lib/orchestration/__tests__/execution.test.ts` - Execution engine & node behavior
+- `src/lib/graph/__tests__/store.test.ts` - Node graph state management
+- `src/lib/canvas/__tests__/ports.test.ts` - Port geometry calculations
+- `src/lib/inference/__tests__/api-client.test.ts` - Backend API client
+
+### Documentation
+
+- **[TESTING.md](./TESTING.md)** - Full testing guide (mocking, coverage, CI setup)
+- **[docs/NODE_BEHAVIOR.md](./docs/NODE_BEHAVIOR.md)** - Node execution rules & expected behavior
+
 ## License
 
 MIT
