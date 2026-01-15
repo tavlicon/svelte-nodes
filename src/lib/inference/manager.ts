@@ -95,6 +95,10 @@ class InferenceManager {
     request: Img2ImgRequest,
     onProgress?: ProgressCallback
   ): Promise<InferenceResult> {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'missing-image-v1',hypothesisId:'H2',location:'src/lib/inference/manager.ts:runImg2Img',message:'runImg2Img called',data:{hasInputImage:!!request?.inputImage},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     // Check backend status first
     const status = await this.refreshStatus();
     
@@ -182,6 +186,10 @@ class InferenceManager {
     request: TripoSRRequest,
     onProgress?: ProgressCallback
   ): Promise<TripoSRResult> {
+    // #region agent log
+    fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'missing-image-v1',hypothesisId:'H2',location:'src/lib/inference/manager.ts:runTripoSR',message:'runTripoSR called',data:{hasInputImage:!!request?.inputImage},timestamp:Date.now()})}).catch(()=>{});
+    // #endregion
+
     // Check backend status first
     await this.refreshStatus();
     
