@@ -5,10 +5,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal, Optional
-import os
-import json
 from pathlib import Path
-import torch
 
 JobType = Literal["img2img", "triposr"]
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
@@ -150,54 +147,6 @@ class JobStore:
         rec.result = result
         rec.done.set()
         await self.emit(job_id, "completed", {"status": "succeeded", "result": result})
-        # region agent log
-        try:
-            debug_log_path = Path(os.getenv("DNA_DEBUG_LOG_PATH", str(Path(__file__).resolve().parents[3] / ".cursor" / "debug.log")))
-            # Approximate retained payload bytes (only counts raw image bytes)
-            img_bytes = rec.payload.get("image_bytes")
-            approx_payload = len(img_bytes) if isinstance(img_bytes, (bytes, bytearray)) else 0
-            # Approximate retained result bytes (notably SD base64 images can be large)
-            approx_result = 0
-            if isinstance(rec.result, dict):
-                img_str = rec.result.get("image")
-                if isinstance(img_str, str):
-                    approx_result += len(img_str)
-            # Totals across all retained jobs (rough, but useful for leak detection)
-            total_payload = 0
-            total_result = 0
-            for _jid, _rec in self._jobs.items():
-                _b = _rec.payload.get("image_bytes")
-                if isinstance(_b, (bytes, bytearray)):
-                    total_payload += len(_b)
-                if isinstance(_rec.result, dict):
-                    _img = _rec.result.get("image")
-                    if isinstance(_img, str):
-                        total_result += len(_img)
-            mps_alloc = (torch.mps.current_allocated_memory() if hasattr(torch, "mps") and torch.backends.mps.is_available() else None)
-            cuda_alloc = (torch.cuda.memory_allocated() if torch.cuda.is_available() else None)
-            debug_log_path.open("a").write(json.dumps({
-                "sessionId": "debug-session",
-                "runId": "run1",
-                "hypothesisId": "H4",
-                "location": "backend/app/runtime/jobs.py:JobStore.succeed",
-                "message": "Job succeeded",
-                "data": {
-                    "jobId": job_id,
-                    "jobType": rec.type,
-                    "approxPayloadBytes": approx_payload,
-                    "approxResultBytes": approx_result,
-                    "jobCount": len(self._jobs),
-                    "totalPayloadBytes": total_payload,
-                    "totalResultBytes": total_result,
-                    "mps_allocated": mps_alloc,
-                    "cuda_allocated": cuda_alloc,
-                },
-                "timestamp": int(time.time() * 1000)
-            }) + "\n")
-        except Exception:
-            pass
-        # endregion
-
     async def fail(self, job_id: str, message: str) -> None:
         rec = await self.get(job_id)
         rec.status = "failed"

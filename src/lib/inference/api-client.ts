@@ -30,21 +30,6 @@ export async function checkBackendStatus(): Promise<BackendStatus | null> {
     if (response.ok) {
       const data = await response.json();
 
-      // #region agent log
-      fetch('http://127.0.0.1:7242/ingest/abe54877-15bd-4ed2-bfd1-f461dfe66d18', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sessionId: 'debug-session',
-          runId: 'pre-fix',
-          hypothesisId: 'H2',
-          location: 'src/lib/inference/api-client.ts:checkBackendStatus',
-          message: 'Backend status fetch success',
-          data: { status: response.status, loaded: data.loaded, device: data.device },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
 
       console.log(`Backend available: model ${data.loaded ? 'loaded' : 'not loaded'} on ${data.device}`);
       return {
@@ -54,21 +39,6 @@ export async function checkBackendStatus(): Promise<BackendStatus | null> {
       };
     }
   } catch (error) {
-    // #region agent log
-    fetch('http://127.0.0.1:7242/ingest/abe54877-15bd-4ed2-bfd1-f461dfe66d18', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        sessionId: 'debug-session',
-        runId: 'pre-fix',
-        hypothesisId: 'H2',
-        location: 'src/lib/inference/api-client.ts:checkBackendStatus',
-        message: 'Backend status fetch failed',
-        data: { error: error instanceof Error ? error.message : String(error) },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
 
     console.log('Backend not available, falling back to simulation mode');
   }

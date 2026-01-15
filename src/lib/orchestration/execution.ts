@@ -71,18 +71,12 @@ class ExecutionEngine {
   buildGraph(nodes: Map<string, NodeInstance>, edges: Map<string, Edge>) {
     this.executionGraph.clear();
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'execution.ts:buildGraph',message:'Building graph',data:{nodeCount:nodes.size,edgeCount:edges.size,nodeTypes:Array.from(nodes.values()).map(n=>({id:n.id.slice(-6),type:n.type})),edges:Array.from(edges.values()).map(e=>({src:e.sourceNodeId.slice(-6),tgt:e.targetNodeId.slice(-6)}))},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1'})}).catch(()=>{});
-    // #endregion
     
     // Initialize all nodes
     for (const [id, node] of nodes) {
       // Only mark as dirty if node hasn't successfully completed with cached output
       const hasValidOutput = node.status === 'complete' && node.outputCache && Object.keys(node.outputCache).length > 0;
       
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'execution.ts:buildGraph:initNode',message:'Init node dirty status',data:{nodeId:id.slice(-6),type:node.type,status:node.status,hasValidOutput,willBeDirty:!hasValidOutput},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX'})}).catch(()=>{});
-      // #endregion
       
       this.executionGraph.set(id, {
         id,
@@ -180,9 +174,6 @@ class ExecutionEngine {
     // Get execution order
     const order = this.topologicalSort();
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'execution.ts:execute',message:'Execution order',data:{orderCount:order.length,order:order.map(id=>{const n=graphStore.getNodeById(id);return{id:id.slice(-6),type:n?.type};})},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H3'})}).catch(()=>{});
-    // #endregion
     
     if (order.length === 0) {
       console.log('No dirty nodes to execute');
@@ -202,9 +193,6 @@ class ExecutionEngine {
         }
         await this.executeNode(nodeId);
       }
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'execution.ts:execute',message:'Execution completed successfully',data:{nodesExecuted:order.length},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-      // #endregion
       return { success: true };
     } catch (error) {
       // Check if this was an abort/cancel
@@ -214,9 +202,6 @@ class ExecutionEngine {
       }
       
       const errorMessage = error instanceof Error ? error.message : String(error);
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'execution.ts:execute',message:'Execution failed with error',data:{error:errorMessage},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H5'})}).catch(()=>{});
-      // #endregion
       console.error('Pipeline execution failed:', errorMessage);
       return { 
         success: false, 
@@ -241,24 +226,6 @@ class ExecutionEngine {
     
     const inputEdges = graphStore.getInputEdges(nodeId);
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'execution.ts:executeNode',message:'Executing node',data:{nodeId:nodeId.slice(-6),type:node.type,inputEdgeCount:inputEdges.length,hasImageInput:inputEdges.some(e=>e.targetPortId==='image')},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H4'})}).catch(()=>{});
-    // #endregion
-    
-    // Skip model/triposr nodes that have no input connections - they can't run without input
-    const requiresImageInput = ['model', 'triposr'].includes(node.type);
-    const hasImageInputConnection = inputEdges.some(e => e.targetPortId === 'image');
-    
-    if (requiresImageInput && !hasImageInputConnection) {
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'execution.ts:executeNode',message:'SKIPPING unconnected model node',data:{nodeId:nodeId.slice(-6),type:node.type},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'FIX2'})}).catch(()=>{});
-      // #endregion
-      console.log(`Skipping ${node.type} node ${nodeId.slice(-6)} - no image input connected`);
-      // Mark as clean so it doesn't run again until connected
-      const execNode = this.executionGraph.get(nodeId);
-      if (execNode) execNode.dirty = false;
-      return;
-    }
     
     // Update status
     graphStore.updateNode(nodeId, { status: 'running', error: undefined });
@@ -431,9 +398,6 @@ class ExecutionEngine {
     // Get input image (from connected image node)
     const inputImage = inputs.image as string | undefined;
     
-    // #region agent log
-    fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({location:'execution.ts:executeImg2Img',message:'Img2Img called',data:{nodeId:node.id.slice(-6),hasInputImage:!!inputImage,inputKeys:Object.keys(inputs)},timestamp:Date.now(),sessionId:'debug-session',hypothesisId:'H1,H4'})}).catch(()=>{});
-    // #endregion
     
     if (!inputImage || inputImage.trim() === '') {
       throw new Error('No input image connected. Connect an Image node to the model\'s image input port.');
