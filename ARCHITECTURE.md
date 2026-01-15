@@ -450,6 +450,11 @@ src/lib/
 
 backend/
 ├── server.py              # FastAPI server (SD 1.5 + TripoSR)
+├── app/                   # Phase_0 refactor scaffolding (settings/services/runtime)
+│   ├── config.py          # Env-based paths + CORS + debug log path
+│   ├── services/          # Extracted orchestration for SD img2img + TripoSR
+│   ├── runtime/           # Device selection + per-model concurrency guards
+│   └── storage/           # Artifact naming/path helpers (writes to data/output)
 ├── requirements.txt       # Python dependencies
 └── venv/                  # Python virtual environment
 ```

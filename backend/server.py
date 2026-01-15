@@ -27,6 +27,20 @@ from fastapi.responses import StreamingResponse, FileResponse
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
+from app.config import load_settings
+from app.runtime.device import get_device_and_dtype as _get_device_and_dtype
+from app.storage.artifacts import ArtifactPaths
+from app.services.img2img_service import Img2ImgService, Img2ImgParams
+from app.services.triposr_service import TripoSRService, TripoSRParams
+from app.runtime.concurrency import ConcurrencyManager
+from app.runtime.jobs import JobStore
+from app.runtime.queue import JobQueueManager
+from app.runtime.events import periodic_cleanup_task
+from app.api.routes_jobs import create_jobs_router
+from app.services.providers.base import ProviderContext
+from app.services.providers.local_sd15 import LocalSD15Provider, SD15ProviderDeps
+from app.services.providers.local_triposr import LocalTripoSRProvider, TripoSRProviderDeps
+
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
@@ -55,13 +69,14 @@ from transformers import CLIPTextModel, CLIPTokenizer
 
 app = FastAPI(title="Generative Design Studio Backend", version="1.0.0")
 
-# Debug instrumentation configuration (do not remove until post-fix verification)
-DEBUG_LOG_PATH = Path("/Users/olicon/github/generative-design-studio-2/.cursor/debug.log")
+SETTINGS = load_settings()
+CONCURRENCY = ConcurrencyManager()
+JOB_STORE = JobStore(ttl_seconds=60 * 30)
 
 # CORS for frontend
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_origins=SETTINGS.cors_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -134,13 +149,104 @@ def get_scheduler(sampler_name: str, scheduler_type: str, config):
 
 def get_device_and_dtype():
     """Determine the best device and dtype for inference"""
-    if torch.cuda.is_available():
-        return "cuda", torch.float16
-    elif torch.backends.mps.is_available():
-        # MPS works best with float32 to avoid NaN issues in VAE
-        return "mps", torch.float32
-    else:
-        return "cpu", torch.float32
+    return _get_device_and_dtype()
+
+class _StoreEmitter:
+    def __init__(self, store: JobStore, job_id: str):
+        self.store = store
+        self.job_id = job_id
+
+    async def queued(self) -> None:
+        return
+
+    async def started(self) -> None:
+        # JobStore.set_running already emits the started event.
+        return
+
+    async def progress(self, *, current: int, total: int, stage: str = "") -> None:
+        await self.store.set_progress(self.job_id, current=current, total=total, stage=stage)
+
+def _set_sd_scheduler(p: StableDiffusionImg2ImgPipeline, sampler_name: str, scheduler_type: str) -> None:
+    p.scheduler = get_scheduler(sampler_name, scheduler_type, p.scheduler.config)
+
+# Providers are local-first and wrap existing Phase_0 services.
+SD_PROVIDER = LocalSD15Provider(
+    SD15ProviderDeps(
+        get_pipeline=lambda: pipeline,
+        is_loaded=lambda: model_loaded,
+        get_current_device=lambda: current_device,
+        set_scheduler=_set_sd_scheduler,
+        concurrency=CONCURRENCY,
+        output_dir=SETTINGS.output_dir,
+    )
+)
+
+TRIPOSR_PROVIDER = LocalTripoSRProvider(
+    TripoSRProviderDeps(
+        get_model=lambda: triposr_model,
+        is_loaded=lambda: triposr_loaded,
+        concurrency=CONCURRENCY,
+        output_dir=SETTINGS.output_dir,
+    )
+)
+
+async def _execute_img2img_job(job_id: str) -> None:
+    rec = await JOB_STORE.get(job_id)
+    if rec.status == "cancelled":
+        return
+    if rec.cancel_requested and rec.status == "queued":
+        await JOB_STORE.cancel(job_id)
+        return
+
+    await JOB_STORE.set_running(job_id)
+    emitter = _StoreEmitter(JOB_STORE, job_id)
+    try:
+        result = await SD_PROVIDER.execute(ctx=ProviderContext(), payload=rec.payload, emitter=emitter)
+        await JOB_STORE.succeed(job_id, result)
+    except Exception as e:
+        await JOB_STORE.fail(job_id, str(e))
+
+async def _execute_triposr_job(job_id: str) -> None:
+    rec = await JOB_STORE.get(job_id)
+    if rec.status == "cancelled":
+        return
+    if rec.cancel_requested and rec.status == "queued":
+        await JOB_STORE.cancel(job_id)
+        return
+
+    await JOB_STORE.set_running(job_id)
+    emitter = _StoreEmitter(JOB_STORE, job_id)
+    try:
+        result = await TRIPOSR_PROVIDER.execute(ctx=ProviderContext(), payload=rec.payload, emitter=emitter)
+        await JOB_STORE.succeed(job_id, result)
+    except Exception as e:
+        await JOB_STORE.fail(job_id, str(e))
+
+JOB_QUEUE = JobQueueManager(
+    store=JOB_STORE,
+    execute_img2img=_execute_img2img_job,
+    execute_triposr=_execute_triposr_job,
+)
+
+async def _ensure_sd_loaded() -> None:
+    if not model_loaded or pipeline is None:
+        raise HTTPException(status_code=503, detail="Model not loaded")
+
+async def _ensure_triposr_loaded(chunk_size: int) -> None:
+    global triposr_loaded
+    if not triposr_loaded:
+        success = load_triposr_model(chunk_size)
+        if not success:
+            raise HTTPException(status_code=503, detail="TripoSR model not available")
+
+app.include_router(
+    create_jobs_router(
+        store=JOB_STORE,
+        queue=JOB_QUEUE,
+        ensure_sd_loaded=_ensure_sd_loaded,
+        ensure_triposr_loaded=_ensure_triposr_loaded,
+    )
+)
 
 
 def load_model_local(model_path: str):
@@ -269,8 +375,8 @@ async def startup_event():
 
     # region agent log
     try:
-        DEBUG_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        DEBUG_LOG_PATH.open("a").write(json.dumps({
+        SETTINGS.debug_log_path.parent.mkdir(parents=True, exist_ok=True)
+        SETTINGS.debug_log_path.open("a").write(json.dumps({
             "sessionId": "debug-session",
             "runId": "pre-fix",
             "hypothesisId": "H1",
@@ -332,9 +438,13 @@ async def startup_event():
         logger.warning("⚠️ Model NOT loaded - inference will fail")
     logger.info("=" * 60)
 
+    # Start Phase_1 job queue workers and background cleanup
+    JOB_QUEUE.start()
+    asyncio.create_task(periodic_cleanup_task(JOB_STORE), name="job-ttl-cleanup")
+
     # region agent log
     try:
-        DEBUG_LOG_PATH.open("a").write(json.dumps({
+        SETTINGS.debug_log_path.open("a").write(json.dumps({
             "sessionId": "debug-session",
             "runId": "pre-fix",
             "hypothesisId": "H1",
@@ -422,101 +532,43 @@ async def img2img(
         raise HTTPException(status_code=400, detail=error_msg)
     
     try:
-        # Read and process input image
-        logger.info("📷 Processing input image...")
-        image_data = await image.read()
-        input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
-        logger.info(f"  Input size: {input_image.width}x{input_image.height}")
-        
-        # Resize to target dimensions (must be divisible by 8)
-        # Cap maximum dimension to prevent memory issues (SD 1.5 works best at 512-768)
-        MAX_DIMENSION = 768
-        
-        width = input_image.width
-        height = input_image.height
-        
-        # Scale down if too large while maintaining aspect ratio
-        if width > MAX_DIMENSION or height > MAX_DIMENSION:
-            scale = MAX_DIMENSION / max(width, height)
-            width = int(width * scale)
-            height = int(height * scale)
-            logger.info(f"  Scaling down to fit {MAX_DIMENSION}px max dimension")
-        
-        # Make divisible by 8
-        width = (width // 8) * 8
-        height = (height // 8) * 8
-        
-        if width != input_image.width or height != input_image.height:
-            input_image = input_image.resize((width, height), Image.Resampling.LANCZOS)
-            logger.info(f"  Resized to: {width}x{height}")
-        
-        # Set up scheduler
-        logger.info(f"⚙️ Setting up scheduler: {sampler_name} ({scheduler})")
-        pipeline.scheduler = get_scheduler(
-            sampler_name, 
-            scheduler, 
-            pipeline.scheduler.config
+        logger.info("📷 Reading input image bytes...")
+        image_bytes = await image.read()
+
+        # Phase_1: enqueue a job and await completion (keeps endpoint behavior stable)
+        rec = await JOB_STORE.create(
+            "img2img",
+            {
+                "image_bytes": image_bytes,
+                # Legacy non-stream endpoint doesn't need step progress; avoid callback overhead.
+                "emit_progress": False,
+                "params": {
+                    "positive_prompt": positive_prompt,
+                    "negative_prompt": negative_prompt,
+                    "seed": seed,
+                    "steps": steps,
+                    "cfg": cfg,
+                    "sampler_name": sampler_name,
+                    "scheduler": scheduler,
+                    "denoise": denoise,
+                },
+            },
         )
-        
-        # Set seed for reproducibility
-        generator = torch.Generator(device=current_device)
-        if seed >= 0:
-            generator = generator.manual_seed(seed)
-            logger.info(f"  Using seed: {seed}")
-        else:
-            random_seed = torch.randint(0, 2**32 - 1, (1,)).item()
-            generator = generator.manual_seed(random_seed)
-            logger.info(f"  Using random seed: {random_seed}")
-        
-        # Run inference
-        logger.info("🚀 Starting inference...")
-        start_time = time.time()
-        
-        result = pipeline(
-            prompt=positive_prompt,
-            negative_prompt=negative_prompt,
-            image=input_image,
-            strength=denoise,
-            num_inference_steps=steps,
-            guidance_scale=cfg,
-            generator=generator,
-        )
-        
-        elapsed_time = time.time() - start_time
-        logger.info(f"✅ Inference complete in {elapsed_time:.2f}s")
-        
-        # Get output image
-        output_image = result.images[0]
-        logger.info(f"  Output size: {output_image.width}x{output_image.height}")
-        
-        # Debug: Check if output is black
-        import numpy as np
-        output_array = np.array(output_image)
-        logger.info(f"  Output stats: min={output_array.min()}, max={output_array.max()}, mean={output_array.mean():.2f}")
-        if output_array.max() == 0:
-            logger.warning("⚠️ Output image is all black! This indicates a VAE decoding issue.")
-        
-        # Save to output directory
-        output_dir = Path(__file__).parent.parent / "data" / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        output_filename = f"img2img_{int(time.time())}_{seed}.png"
-        output_path = output_dir / output_filename
-        output_image.save(output_path)
-        logger.info(f"💾 Saved to: {output_path}")
-        
-        # Convert to base64
-        output_base64 = image_to_base64(output_image)
-        
-        logger.info("=" * 50)
-        
-        return {
-            "status": "success",
-            "image": f"data:image/png;base64,{output_base64}",
-            "time_taken": elapsed_time,
-            "width": output_image.width,
-            "height": output_image.height,
-            "output_path": str(output_path),
-        }
+        try:
+            await JOB_QUEUE.enqueue(rec.job_id, "img2img")
+        except Exception:
+            await JOB_STORE.fail(rec.job_id, "Queue is full. Try again shortly.")
+            raise HTTPException(status_code=429, detail="Queue is full. Try again shortly.")
+
+        finished = await JOB_STORE.wait(rec.job_id)
+        if finished.status == "succeeded" and finished.result is not None:
+            logger.info("=" * 50)
+            return finished.result
+        if finished.status == "failed" and finished.error is not None:
+            raise HTTPException(status_code=500, detail=finished.error.message)
+        if finished.status == "cancelled":
+            raise HTTPException(status_code=499, detail="Cancelled")
+        raise HTTPException(status_code=500, detail="Job did not complete successfully")
         
     except Exception as e:
         logger.error(f"❌ Error during inference: {e}")
@@ -551,106 +603,128 @@ async def img2img_stream(
         error_msg = f"Invalid parameter combination: steps={steps} × denoise={denoise} = {effective_steps} effective steps. Need at least 1. Try increasing steps (≥10) or denoise (≥0.1)."
         raise HTTPException(status_code=400, detail=error_msg)
     
-    request_id = str(uuid.uuid4())
-    progress_updates[request_id] = []
-    
+    # region agent log
+    try:
+        SETTINGS.debug_log_path.open("a").write(json.dumps({
+            "sessionId": "debug-session",
+            "runId": "run1",
+            "hypothesisId": "H1",
+            "location": "backend/server.py:img2img_stream",
+            "message": "Entered img2img_stream endpoint",
+            "data": {"steps": steps, "sampler": sampler_name, "scheduler": scheduler, "denoise": denoise},
+            "timestamp": int(time.time() * 1000)
+        }) + "\n")
+    except Exception:
+        pass
+    # endregion
+
     async def generate():
+        rec = None
+        q = None
         try:
-            # Read and process input image
-            image_data = await image.read()
-            input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
-            
-            # Resize to target dimensions
-            # Cap maximum dimension to prevent memory issues
-            MAX_DIMENSION = 768
-            
-            width = input_image.width
-            height = input_image.height
-            
-            # Scale down if too large while maintaining aspect ratio
-            if width > MAX_DIMENSION or height > MAX_DIMENSION:
-                scale = MAX_DIMENSION / max(width, height)
-                width = int(width * scale)
-                height = int(height * scale)
-            
-            # Make divisible by 8
-            width = (width // 8) * 8
-            height = (height // 8) * 8
-            
-            if width != input_image.width or height != input_image.height:
-                input_image = input_image.resize((width, height), Image.Resampling.LANCZOS)
-            
-            # Set up scheduler
-            pipeline.scheduler = get_scheduler(
-                sampler_name,
-                scheduler,
-                pipeline.scheduler.config
+            image_bytes = await image.read()
+            rec = await JOB_STORE.create(
+                "img2img",
+                {
+                    "image_bytes": image_bytes,
+                    # Stream endpoint needs progress.
+                    "emit_progress": True,
+                    "params": {
+                        "positive_prompt": positive_prompt,
+                        "negative_prompt": negative_prompt,
+                        "seed": seed,
+                        "steps": steps,
+                        "cfg": cfg,
+                        "sampler_name": sampler_name,
+                        "scheduler": scheduler,
+                        "denoise": denoise,
+                    },
+                },
             )
-            
-            # Set seed
-            generator = torch.Generator(device=current_device)
-            if seed >= 0:
-                generator = generator.manual_seed(seed)
-            else:
-                generator = generator.manual_seed(torch.randint(0, 2**32 - 1, (1,)).item())
-            
-            # Progress callback
-            def progress_callback(step: int, timestep: int, latents: torch.Tensor):
-                progress_data = {
-                    "step": step + 1,
-                    "total_steps": steps,
-                    "progress": (step + 1) / steps * 100,
-                }
-                progress_updates[request_id].append(progress_data)
-            
-            # Send initial progress
-            yield {
-                "event": "progress",
-                "data": json.dumps({"step": 0, "total_steps": steps, "progress": 0, "status": "starting"})
-            }
-            
-            start_time = time.time()
-            
-            # Run inference with callback
-            result = pipeline(
-                prompt=positive_prompt,
-                negative_prompt=negative_prompt,
-                image=input_image,
-                strength=denoise,
-                num_inference_steps=steps,
-                guidance_scale=cfg,
-                generator=generator,
-                callback=progress_callback,
-                callback_steps=1,
-            )
-            
-            elapsed_time = time.time() - start_time
-            
-            # Get output image
-            output_image = result.images[0]
-            output_base64 = image_to_base64(output_image)
-            
-            # Send completion
-            yield {
-                "event": "complete",
-                "data": json.dumps({
-                    "status": "success",
-                    "image": f"data:image/png;base64,{output_base64}",
-                    "time_taken": elapsed_time,
-                    "width": output_image.width,
-                    "height": output_image.height,
-                })
-            }
+            try:
+                await JOB_QUEUE.enqueue(rec.job_id, "img2img")
+            except Exception:
+                await JOB_STORE.fail(rec.job_id, "Queue is full. Try again shortly.")
+                yield {"event": "error", "data": json.dumps({"status": "error", "message": "Queue is full"})}
+                return
+
+            # Initial progress for legacy clients
+            yield {"event": "progress", "data": json.dumps({"step": 0, "total_steps": steps, "progress": 0, "status": "starting"})}
+
+            # Replay history then subscribe for live events (legacy event mapping)
+            history = await JOB_STORE.list_events_snapshot(rec.job_id)
+            q = await JOB_STORE.subscribe(rec.job_id)
+            # region agent log
+            try:
+                SETTINGS.debug_log_path.open("a").write(json.dumps({
+                    "sessionId": "debug-session",
+                    "runId": "run1",
+                    "hypothesisId": "H1",
+                    "location": "backend/server.py:img2img_stream.generate",
+                    "message": "Subscribed to job events",
+                    "data": {"jobId": rec.job_id},
+                    "timestamp": int(time.time() * 1000)
+                }) + "\n")
+            except Exception:
+                pass
+            # endregion
+
+            try:
+                events = history
+                while True:
+                    if events:
+                        ev = events.pop(0)
+                    else:
+                        ev = await q.get()
+
+                    if ev.event == "progress":
+                        cur = int(ev.data.get("current", 0))
+                        tot = int(ev.data.get("total", steps))
+                        pct = float(ev.data.get("percent", 0.0))
+                        yield {"event": "progress", "data": json.dumps({"step": cur, "total_steps": tot, "progress": pct})}
+                    elif ev.event == "completed":
+                        result = (ev.data.get("result") or {})
+                        yield {"event": "complete", "data": json.dumps({
+                            "status": "success",
+                            "image": result.get("image"),
+                            "time_taken": result.get("time_taken"),
+                            "width": result.get("width"),
+                            "height": result.get("height"),
+                        })}
+                        return
+                    elif ev.event == "failed":
+                        msg = (ev.data.get("error") or {}).get("message", "Job failed")
+                        yield {"event": "error", "data": json.dumps({"status": "error", "message": msg})}
+                        return
+                    elif ev.event == "cancelled":
+                        yield {"event": "error", "data": json.dumps({"status": "error", "message": "Cancelled"})}
+                        return
+            finally:
+                if rec is not None and q is not None:
+                    try:
+                        await JOB_STORE.unsubscribe(rec.job_id, q)
+                    except Exception:
+                        pass
+                # region agent log
+                try:
+                    SETTINGS.debug_log_path.open("a").write(json.dumps({
+                        "sessionId": "debug-session",
+                        "runId": "run1",
+                        "hypothesisId": "H1",
+                        "location": "backend/server.py:img2img_stream.generate",
+                        "message": "Unsubscribed from job events",
+                        "data": {"jobId": rec.job_id if rec is not None else None},
+                        "timestamp": int(time.time() * 1000)
+                    }) + "\n")
+                except Exception:
+                    pass
+                # endregion
             
         except Exception as e:
             yield {
                 "event": "error",
                 "data": json.dumps({"status": "error", "message": str(e)})
             }
-        finally:
-            # Cleanup
-            if request_id in progress_updates:
-                del progress_updates[request_id]
     
     return EventSourceResponse(generate())
 
@@ -682,71 +756,45 @@ async def img2img_base64(
         raise HTTPException(status_code=400, detail=error_msg)
     
     try:
-        # Decode input image from base64
+        # Convert base64 input to bytes for the job system (store bytes, decode in worker)
         input_image = base64_to_image(image_base64).convert("RGB")
-        
-        # Resize to target dimensions (must be divisible by 8)
-        # Cap maximum dimension to prevent memory issues
-        MAX_DIMENSION = 768
-        
-        width = input_image.width
-        height = input_image.height
-        
-        # Scale down if too large while maintaining aspect ratio
-        if width > MAX_DIMENSION or height > MAX_DIMENSION:
-            scale = MAX_DIMENSION / max(width, height)
-            width = int(width * scale)
-            height = int(height * scale)
-        
-        # Make divisible by 8
-        width = (width // 8) * 8
-        height = (height // 8) * 8
-        
-        if width != input_image.width or height != input_image.height:
-            input_image = input_image.resize((width, height), Image.Resampling.LANCZOS)
-        
-        # Set up scheduler
-        pipeline.scheduler = get_scheduler(
-            sampler_name,
-            scheduler,
-            pipeline.scheduler.config
+        buf = io.BytesIO()
+        input_image.save(buf, format="PNG")
+        image_bytes = buf.getvalue()
+
+        rec = await JOB_STORE.create(
+            "img2img",
+            {
+                "image_bytes": image_bytes,
+                # Legacy non-stream endpoint doesn't need step progress; avoid callback overhead.
+                "emit_progress": False,
+                "params": {
+                    "positive_prompt": positive_prompt,
+                    "negative_prompt": negative_prompt,
+                    "seed": seed,
+                    "steps": steps,
+                    "cfg": cfg,
+                    "sampler_name": sampler_name,
+                    "scheduler": scheduler,
+                    "denoise": denoise,
+                },
+            },
         )
-        
-        # Set seed for reproducibility
-        generator = torch.Generator(device=current_device)
-        if seed >= 0:
-            generator = generator.manual_seed(seed)
-        else:
-            generator = generator.manual_seed(torch.randint(0, 2**32 - 1, (1,)).item())
-        
-        # Run inference
-        start_time = time.time()
-        
-        result = pipeline(
-            prompt=positive_prompt,
-            negative_prompt=negative_prompt,
-            image=input_image,
-            strength=denoise,
-            num_inference_steps=steps,
-            guidance_scale=cfg,
-            generator=generator,
-        )
-        
-        elapsed_time = time.time() - start_time
-        
-        # Get output image
-        output_image = result.images[0]
-        
-        # Convert to base64
-        output_base64 = image_to_base64(output_image)
-        
-        return {
-            "status": "success",
-            "image": f"data:image/png;base64,{output_base64}",
-            "time_taken": elapsed_time,
-            "width": output_image.width,
-            "height": output_image.height,
-        }
+        try:
+            await JOB_QUEUE.enqueue(rec.job_id, "img2img")
+        except Exception:
+            await JOB_STORE.fail(rec.job_id, "Queue is full. Try again shortly.")
+            raise HTTPException(status_code=429, detail="Queue is full. Try again shortly.")
+
+        finished = await JOB_STORE.wait(rec.job_id)
+        if finished.status == "succeeded" and finished.result is not None:
+            # Preserve legacy response shape (no output_path here)
+            return {k: finished.result.get(k) for k in ["status", "image", "time_taken", "width", "height"]}
+        if finished.status == "failed" and finished.error is not None:
+            raise HTTPException(status_code=500, detail=finished.error.message)
+        if finished.status == "cancelled":
+            raise HTTPException(status_code=499, detail="Cancelled")
+        raise HTTPException(status_code=500, detail="Job did not complete successfully")
         
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -959,183 +1007,42 @@ async def generate_3d_mesh(
         success = load_triposr_model(chunk_size)
         if not success:
             raise HTTPException(status_code=503, detail="TripoSR model not available")
-    else:
-        # Update chunk size
-        triposr_model.renderer.set_chunk_size(chunk_size)
     
     try:
-        import trimesh
-        
-        # Read and process input image
-        logger.info("📷 Processing input image...")
-        image_data = await image.read()
-        input_image = Image.open(io.BytesIO(image_data)).convert("RGB")
-        logger.info(f"  Input size: {input_image.width}x{input_image.height}")
-        
-        # Remove background if requested
-        if remove_bg:
-            logger.info("  Removing background...")
-            input_image = remove_background_tsr(input_image, foreground_ratio)
-            logger.info(f"  After background removal: {input_image.width}x{input_image.height}")
-        else:
-            # Just resize to proper size
-            input_image = process_triposr_image(input_image, 512)
-        
-        logger.info(f"  Final input size: {input_image.width}x{input_image.height}")
-        
-        start_time = time.time()
-        
-        # Get device
-        device = str(next(triposr_model.parameters()).device)
-        
-        # Run TSR model forward pass to get scene codes
-        logger.info("🧠 Running TSR inference...")
-        with torch.no_grad():
-            scene_codes = triposr_model([input_image], device=device)
-        
-        logger.info(f"  Scene codes shape: {scene_codes.shape}")
-        
-        # Extract mesh using marching cubes
-        logger.info(f"🔺 Extracting mesh at resolution {mc_resolution}...")
-        with torch.no_grad():
-            meshes = triposr_model.extract_mesh(
-                scene_codes,
-                has_vertex_color=(not bake_texture),
-                resolution=mc_resolution,
-            )
-        
-        mesh = meshes[0]
-        
-        # Apply orientation correction: TripoSR outputs meshes in canonical pose
-        # (typically Y-up/vertical). Rotate -90° around X to lay objects flat.
-        # Users can fine-tune with the UI orientation controls.
-        # PREVIOUS: Single rotation (commented out for rollback)
-        # logger.info("🔄 Applying default orientation correction (-90° X-axis)...")
-        # rotation_matrix = trimesh.transformations.rotation_matrix(
-        #     # np.radians(-90), [1, 0, 0], point=[0, 0, 0]
-        #     # np.radians(0), [0, 1, 0], point=[0, 0, 0]
-        #     np.radians(90), [0, 0, 1], point=[0, 0, 0]
-        # )
-        # mesh.apply_transform(rotation_matrix)
-        
-        # Apply orientation correction
-        logger.info("🔄 Applying default orientation correction...")
-        
-        # First: rotate 90° around Z to lay flat on correct axis
-        rotation_z = trimesh.transformations.rotation_matrix(
-            np.radians(90), [0, 0, 1], point=[0, 0, 0]
+        image_bytes = await image.read()
+
+        rec = await JOB_STORE.create(
+            "triposr",
+            {
+                "image_bytes": image_bytes,
+                "params": {
+                    "foreground_ratio": foreground_ratio,
+                    "mc_resolution": mc_resolution,
+                    "remove_bg": remove_bg,
+                    "chunk_size": chunk_size,
+                    "bake_texture": bake_texture,
+                    "texture_resolution": texture_resolution,
+                    "render_video": render_video,
+                    "render_n_views": render_n_views,
+                    "render_resolution": render_resolution,
+                },
+            },
         )
-        mesh.apply_transform(rotation_z)
-        
-        # Second: rotate 180° around Y to face forward
-        rotation_y = trimesh.transformations.rotation_matrix(
-            np.radians(180), [0, 1, 0], point=[0, 0, 0]
-        )
-        mesh.apply_transform(rotation_y)
-        
-        # Handle texture baking if requested
-        if bake_texture:
-            logger.info(f"🎨 Baking texture at resolution {texture_resolution}...")
-            try:
-                import xatlas
-                from tsr.bake_texture import bake_texture as bake_texture_fn
-                
-                bake_output = bake_texture_fn(mesh, triposr_model, scene_codes[0], texture_resolution)
-                
-                # Update mesh with UV mapping
-                mesh = trimesh.Trimesh(
-                    vertices=mesh.vertices[bake_output["vmapping"]],
-                    faces=bake_output["indices"],
-                    visual=trimesh.visual.TextureVisuals(
-                        uv=bake_output["uvs"],
-                    ),
-                )
-                logger.info("  Texture baked successfully")
-            except Exception as e:
-                logger.warning(f"  Texture baking failed, using vertex colors: {e}")
-        
-        mesh_time = time.time() - start_time
-        logger.info(f"✅ Mesh generation complete in {mesh_time:.2f}s")
-        logger.info(f"  Vertices: {len(mesh.vertices)}, Faces: {len(mesh.faces)}")
-        
-        # Save mesh as GLB
-        output_dir = Path(__file__).parent.parent / "data" / "output"
-        output_dir.mkdir(parents=True, exist_ok=True)
-        timestamp = int(time.time())
-        unique_id = uuid.uuid4().hex[:8]
-        output_filename = f"mesh_{timestamp}_{unique_id}.glb"
-        output_path = output_dir / output_filename
-        
-        # Export to GLB
-        mesh.export(str(output_path), file_type="glb")
-        logger.info(f"💾 Saved to: {output_path}")
-        
-        # Generate turntable video if requested
-        video_url = None
-        video_time = 0.0
-        if render_video:
-            logger.info(f"🎬 Rendering turntable video ({render_n_views} frames at {render_resolution}px)...")
-            video_start = time.time()
-            try:
-                from tsr.utils import save_video
-                
-                # Render frames using NeRF
-                with torch.no_grad():
-                    render_images = triposr_model.render(
-                        scene_codes,
-                        n_views=render_n_views,
-                        height=render_resolution,
-                        width=render_resolution,
-                        return_type="pil"
-                    )
-                
-                # Save as MP4
-                video_filename = f"render_{timestamp}_{unique_id}.mp4"
-                video_path = output_dir / video_filename
-                # Use 12fps for slower, smoother turntable animation
-                save_video(render_images[0], str(video_path), fps=12)
-                
-                video_time = time.time() - video_start
-                video_url = f"/data/output/{video_filename}"
-                logger.info(f"  Video saved to: {video_path} ({video_time:.2f}s)")
-            except Exception as e:
-                logger.warning(f"  Video rendering failed: {e}")
-                import traceback
-                traceback.print_exc()
-        
-        # Also save a rendered preview image (fallback for no-video case)
-        preview_filename = output_filename.replace(".glb", "_preview.png")
-        preview_path = output_dir / preview_filename
-        
-        # Create a simple preview by rendering the mesh
-        preview_url = None
         try:
-            scene = mesh.scene()
-            # Get PNG data from scene
-            png_data = scene.save_image(resolution=(512, 512))
-            with open(preview_path, 'wb') as f:
-                f.write(png_data)
-            logger.info(f"  Preview saved to: {preview_path}")
-            preview_url = f"/data/output/{preview_filename}"
-        except Exception as e:
-            logger.warning(f"  Could not generate preview: {e}")
-        
-        total_time = time.time() - start_time
-        logger.info(f"⏱️ Total time: {total_time:.2f}s (mesh: {mesh_time:.2f}s, video: {video_time:.2f}s)")
-        logger.info("=" * 50)
-        
-        return {
-            "status": "success",
-            "mesh_path": f"/data/output/{output_filename}",
-            "video_url": video_url,
-            "preview_url": preview_url,
-            "output_path": str(output_path),
-            "time_taken": total_time,
-            "mesh_time": mesh_time,
-            "video_time": video_time if render_video else None,
-            "vertices": len(mesh.vertices),
-            "faces": len(mesh.faces),
-        }
+            await JOB_QUEUE.enqueue(rec.job_id, "triposr")
+        except Exception:
+            await JOB_STORE.fail(rec.job_id, "Queue is full. Try again shortly.")
+            raise HTTPException(status_code=429, detail="Queue is full. Try again shortly.")
+
+        finished = await JOB_STORE.wait(rec.job_id)
+        if finished.status == "succeeded" and finished.result is not None:
+            logger.info("=" * 50)
+            return finished.result
+        if finished.status == "failed" and finished.error is not None:
+            raise HTTPException(status_code=500, detail=finished.error.message)
+        if finished.status == "cancelled":
+            raise HTTPException(status_code=499, detail="Cancelled")
+        raise HTTPException(status_code=500, detail="Job did not complete successfully")
         
     except Exception as e:
         logger.error(f"❌ Error during TripoSR inference: {e}")
