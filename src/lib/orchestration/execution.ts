@@ -227,26 +227,27 @@ class ExecutionEngine {
     const inputEdges = graphStore.getInputEdges(nodeId);
     
     // -------------------------------------------------------------------------
-    // Pre-flight validation: do NOT run model/triposr nodes without an image input
+    // Pre-flight validation: skip or error model/triposr nodes without image input
     // -------------------------------------------------------------------------
     const requiresImageInput = node.type === 'model' || node.type === 'triposr';
     const hasImageInputConnection = inputEdges.some(e => e.targetPortId === 'image');
     if (requiresImageInput && !hasImageInputConnection) {
+      // If node has NO input edges at all, skip silently - it's disconnected
+      if (inputEdges.length === 0) {
+        return; // Skip silently - node is not connected to any pipeline
+      }
+
+      // Node has some connections but missing required image input - this is an error
       const msg =
         node.type === 'triposr'
           ? 'No input image connected. Connect an Image node to the TripoSR image input port.'
           : "No input image connected. Connect an Image node to the model's image input port.";
 
-      // Mark node error immediately and abort execution without contacting backend.
       graphStore.updateNode(nodeId, {
         status: 'error',
         error: msg,
         outputCache: {},
       });
-
-      // #region agent log
-      fetch('http://127.0.0.1:7243/ingest/be99b28b-f9df-46c7-a353-9718949942ef',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sessionId:'debug-session',runId:'missing-image-v1',hypothesisId:'H1',location:'src/lib/orchestration/execution.ts:executeNode',message:'Blocked execution due to missing image edge',data:{nodeId:nodeId.slice(-6),type:node.type,inputEdgeCount:inputEdges.length},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
 
       throw new Error(msg);
     }
