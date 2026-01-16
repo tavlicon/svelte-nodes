@@ -2561,6 +2561,14 @@
     return false;
   });
   
+  // Check if selected group is already tidy (for disabling Tidy button)
+  let isSelectedGroupTidy = $derived.by(() => {
+    if (!selectedGroupId) return true;
+    // Access nodesVersion to react to node position changes
+    const _ = getNodesVersion();
+    return graphStore.isGroupTidy(selectedGroupId);
+  });
+  
   $effect(() => {
     if (!activeGroupAnchor) return;
     
@@ -3496,7 +3504,7 @@
       showGroup={activeGroupAnchor.type === 'selection'}
       showUngroup={activeGroupAnchor.type === 'group'}
       showTidy={activeGroupAnchor.type === 'group'}
-      tidyDisabled={false}
+      tidyDisabled={isSelectedGroupTidy}
       onGroup={handleCreateGroup}
       onUngroup={handleUngroup}
       onTidy={handleTidyGroup}

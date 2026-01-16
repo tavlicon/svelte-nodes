@@ -620,7 +620,118 @@ const GROUP_PADDING = 24;
 // Container width constraints for row-based packing
 const TIDY_MIN_WIDTH = 300;   // Minimum container width
 const TIDY_MAX_WIDTH = 1600;  // Maximum container width
+
+// Tolerance for "already tidy" check (in pixels)
+const TIDY_TOLERANCE = 5;
 // ============================================================================
+
+/**
+ * Check if a group is already tidy (nodes uniformly distributed with correct gaps,
+ * and group bounds fit tightly around content).
+ * 
+ * @param groupId - The group to check
+ * @returns true if already tidy, false if tidy would make changes
+ */
+function isGroupTidy(groupId: string): boolean {
+  const group = groups.get(groupId);
+  if (!group) return true;
+  
+  // Get image nodes that are members of this group
+  const imageNodes = group.memberIds
+    .map(id => nodes.get(id))
+    .filter((n): n is NodeInstance => n !== undefined && n.type === 'image');
+  
+  // No nodes = already tidy (nothing to do)
+  if (imageNodes.length === 0) return true;
+  
+  // Calculate actual content bounds
+  const minX = Math.min(...imageNodes.map(n => n.x));
+  const maxX = Math.max(...imageNodes.map(n => n.x + n.width));
+  const minY = Math.min(...imageNodes.map(n => n.y));
+  const maxY = Math.max(...imageNodes.map(n => n.y + n.height));
+  
+  // Check if group bounds match content + padding (within tolerance)
+  const expectedGroupX = minX - GROUP_PADDING;
+  const expectedGroupY = minY - GROUP_PADDING;
+  const expectedGroupWidth = (maxX - minX) + GROUP_PADDING * 2;
+  const expectedGroupHeight = (maxY - minY) + GROUP_PADDING * 2;
+  
+  const groupFits = 
+    Math.abs(group.x - expectedGroupX) <= TIDY_TOLERANCE &&
+    Math.abs(group.y - expectedGroupY) <= TIDY_TOLERANCE &&
+    Math.abs(group.width - expectedGroupWidth) <= TIDY_TOLERANCE &&
+    Math.abs(group.height - expectedGroupHeight) <= TIDY_TOLERANCE;
+  
+  if (!groupFits) return false;
+  
+  // For single node, just check group bounds (already checked above)
+  if (imageNodes.length === 1) return true;
+  
+  // Sort nodes by Y first (to group into rows), then by X within each row
+  const sorted = [...imageNodes].sort((a, b) => {
+    // Group by Y position (within tolerance = same row)
+    if (Math.abs(a.y - b.y) > TIDY_TOLERANCE) {
+      return a.y - b.y;
+    }
+    // Within same row, sort by X
+    return a.x - b.x;
+  });
+  
+  // Group nodes into rows (nodes with same Y within tolerance)
+  const rows: NodeInstance[][] = [];
+  let currentRow: NodeInstance[] = [sorted[0]];
+  
+  for (let i = 1; i < sorted.length; i++) {
+    const node = sorted[i];
+    const lastNodeInRow = currentRow[currentRow.length - 1];
+    
+    // Same row if Y is within tolerance
+    if (Math.abs(node.y - lastNodeInRow.y) <= TIDY_TOLERANCE) {
+      currentRow.push(node);
+    } else {
+      // New row
+      rows.push(currentRow);
+      currentRow = [node];
+    }
+  }
+  rows.push(currentRow); // Don't forget the last row
+  
+  // Check each row has uniform horizontal gaps
+  for (const row of rows) {
+    // Sort row by X position
+    row.sort((a, b) => a.x - b.x);
+    
+    // Check horizontal gaps within row
+    for (let i = 0; i < row.length - 1; i++) {
+      const current = row[i];
+      const next = row[i + 1];
+      const gap = next.x - (current.x + current.width);
+      if (Math.abs(gap - TIDY_GAP) > TIDY_TOLERANCE) {
+        return false;
+      }
+    }
+    
+    // Check all nodes in row start at same X (left-aligned to row start)
+    // First node should be at minX (the anchor)
+    if (row.length > 0 && Math.abs(row[0].x - minX) > TIDY_TOLERANCE) {
+      return false;
+    }
+  }
+  
+  // Check vertical gaps between rows
+  if (rows.length > 1) {
+    for (let i = 0; i < rows.length - 1; i++) {
+      const currentRowMaxY = Math.max(...rows[i].map(n => n.y + n.height));
+      const nextRowMinY = Math.min(...rows[i + 1].map(n => n.y));
+      const rowGap = nextRowMinY - currentRowMaxY;
+      if (Math.abs(rowGap - TIDY_GAP) > TIDY_TOLERANCE) {
+        return false;
+      }
+    }
+  }
+  
+  return true;
+}
 
 /**
  * Row-based shelf packing algorithm for tidying image nodes in a group.
@@ -646,8 +757,8 @@ function tidyGroupNodes(groupId: string): void {
     .map(id => nodes.get(id))
     .filter((n): n is NodeInstance => n !== undefined && n.type === 'image');
   
-  // Need at least 2 nodes to tidy
-  if (imageNodes.length < 2) return;
+  // Need at least 1 node to tidy/resize-to-fit
+  if (imageNodes.length < 1) return;
   
   // Sort nodes left-to-right by X position (preserves visual order)
   const sorted = [...imageNodes].sort((a, b) => a.x - b.x);
@@ -850,5 +961,6 @@ export const graphStore = {
   recordMove,
   
   // Tidy group nodes
+  isGroupTidy,
   tidyGroupNodes,
 };
