@@ -790,10 +790,12 @@
           // Add to selection
           graphStore.selectNode(hitNodeId, true);
         }
+        selectedGroupId = null; // Clear group selection when modifying node selection
       } else {
         // Regular click: select only this node (unless already selected)
         if (!graphStore.selectedNodeIds.has(hitNodeId)) {
           graphStore.selectNode(hitNodeId, false);
+          selectedGroupId = null; // Clear group selection when selecting a node
         }
       }
       
