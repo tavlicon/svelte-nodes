@@ -1296,9 +1296,30 @@
     }
     
     if (groupDragId) {
-      if (groupDragMoved && groupDragStartBounds) {
-        const group = graphStore.groups.get(groupDragId);
-        if (group) {
+      const group = graphStore.groups.get(groupDragId);
+      if (groupDragMoved && groupDragStartBounds && group) {
+        // Check if any new image nodes are now inside the group bounds
+        const groupBounds = {
+          minX: group.x,
+          minY: group.y,
+          maxX: group.x + group.width,
+          maxY: group.y + group.height,
+        };
+        const nodesInBounds = getImageNodesInBounds(groupBounds);
+        // Merge existing members with any new nodes now inside bounds
+        const updatedMembers = Array.from(new Set([...group.memberIds, ...nodesInBounds]));
+        
+        const membersChanged = updatedMembers.length !== group.memberIds.length ||
+          updatedMembers.some(id => !group.memberIds.includes(id));
+        
+        if (membersChanged) {
+          graphStore.setGroupMembers(groupDragId, updatedMembers);
+          graphStore.recordGroupChange(
+            groupDragId,
+            { ...group, ...groupDragStartBounds, memberIds: group.memberIds },
+            { ...group, memberIds: updatedMembers }
+          );
+        } else {
           graphStore.recordGroupChange(
             groupDragId,
             { ...group, ...groupDragStartBounds },
