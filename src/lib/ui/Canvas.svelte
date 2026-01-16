@@ -102,6 +102,9 @@
   let groupResizeStartBounds: { x: number; y: number; width: number; height: number } | null = null;
   let groupHoverResizeId = $state<string | null>(null);
   let groupHoveringResize = $state(false);
+  // Resize direction: 'n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'
+  type ResizeDirection = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw' | null;
+  let groupResizeDirection = $state<ResizeDirection>(null);
   
   // Multi-touch
   let activePointers = new Map<number, { x: number; y: number }>();
@@ -804,6 +807,8 @@
     const group = graphStore.groups.get(groupId);
     if (!group) return;
     selectedGroupId = groupId;
+    groupMenuOpen = true;
+    groupMenuAnchor = { type: 'group', groupId };
     graphStore.deselectAll();
   }
 
@@ -843,7 +848,7 @@
     containerElement.setPointerCapture(e.pointerId);
   }
 
-  function handleGroupResizeStart(e: PointerEvent, groupId: string) {
+  function handleGroupResizeStart(e: PointerEvent, groupId: string, direction: ResizeDirection = 'se') {
     e.preventDefault();
     e.stopPropagation();
     
@@ -857,6 +862,7 @@
     groupResizeStartWorld = screenToWorld(screenX, screenY);
     groupResizeStartBounds = { x: group.x, y: group.y, width: group.width, height: group.height };
     groupResizeId = groupId;
+    groupResizeDirection = direction;
     
     activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     containerElement.setPointerCapture(e.pointerId);
@@ -984,14 +990,42 @@
     const viewHeight = rect.height;
     const world = screenToWorld(screenX, screenY, viewWidth, viewHeight);
 
-    if (groupResizeId && groupResizeStartBounds) {
+    if (groupResizeId && groupResizeStartBounds && groupResizeDirection) {
       const deltaX = world.x - groupResizeStartWorld.x;
       const deltaY = world.y - groupResizeStartWorld.y;
-      const nextWidth = Math.max(GROUP_MIN_SIZE, groupResizeStartBounds.width + deltaX);
-      const nextHeight = Math.max(GROUP_MIN_SIZE, groupResizeStartBounds.height + deltaY);
+      
+      let newX = groupResizeStartBounds.x;
+      let newY = groupResizeStartBounds.y;
+      let newWidth = groupResizeStartBounds.width;
+      let newHeight = groupResizeStartBounds.height;
+      
+      // Handle horizontal resizing
+      if (groupResizeDirection.includes('e')) {
+        newWidth = Math.max(GROUP_MIN_SIZE, groupResizeStartBounds.width + deltaX);
+      } else if (groupResizeDirection.includes('w')) {
+        const proposedWidth = groupResizeStartBounds.width - deltaX;
+        if (proposedWidth >= GROUP_MIN_SIZE) {
+          newWidth = proposedWidth;
+          newX = groupResizeStartBounds.x + deltaX;
+        }
+      }
+      
+      // Handle vertical resizing
+      if (groupResizeDirection.includes('s')) {
+        newHeight = Math.max(GROUP_MIN_SIZE, groupResizeStartBounds.height + deltaY);
+      } else if (groupResizeDirection.includes('n')) {
+        const proposedHeight = groupResizeStartBounds.height - deltaY;
+        if (proposedHeight >= GROUP_MIN_SIZE) {
+          newHeight = proposedHeight;
+          newY = groupResizeStartBounds.y + deltaY;
+        }
+      }
+      
       graphStore.updateGroup(groupResizeId, {
-        width: nextWidth,
-        height: nextHeight,
+        x: newX,
+        y: newY,
+        width: newWidth,
+        height: newHeight,
       });
       return;
     }
@@ -1218,6 +1252,7 @@
       }
       groupResizeId = null;
       groupResizeStartBounds = null;
+      groupResizeDirection = null;
       canvasElement.style.cursor = '';
       return;
     }
@@ -1435,6 +1470,7 @@
       groupResizeId = null;
       groupDragStartBounds = null;
       groupResizeStartBounds = null;
+      groupResizeDirection = null;
       groupMemberStartPositions.clear();
       groupDragMoved = false;
       mode = 'select';
@@ -2954,11 +2990,16 @@
       >
         {group.name}
       </button>
-      <div
-        class="group-resize-handle"
-        onpointerdown={(e) => handleGroupResizeStart(e, group.id)}
-        role="presentation"
-      ></div>
+      <!-- Edge resize handles -->
+      <div class="group-resize-edge edge-n" onpointerdown={(e) => handleGroupResizeStart(e, group.id, 'n')} role="presentation"></div>
+      <div class="group-resize-edge edge-s" onpointerdown={(e) => handleGroupResizeStart(e, group.id, 's')} role="presentation"></div>
+      <div class="group-resize-edge edge-e" onpointerdown={(e) => handleGroupResizeStart(e, group.id, 'e')} role="presentation"></div>
+      <div class="group-resize-edge edge-w" onpointerdown={(e) => handleGroupResizeStart(e, group.id, 'w')} role="presentation"></div>
+      <!-- Corner resize handles -->
+      <div class="group-resize-corner corner-nw" onpointerdown={(e) => handleGroupResizeStart(e, group.id, 'nw')} role="presentation"></div>
+      <div class="group-resize-corner corner-ne" onpointerdown={(e) => handleGroupResizeStart(e, group.id, 'ne')} role="presentation"></div>
+      <div class="group-resize-corner corner-sw" onpointerdown={(e) => handleGroupResizeStart(e, group.id, 'sw')} role="presentation"></div>
+      <div class="group-resize-corner corner-se" onpointerdown={(e) => handleGroupResizeStart(e, group.id, 'se')} role="presentation"></div>
     </div>
   {/each}
   
@@ -4217,6 +4258,10 @@
     cursor: grab;
   }
   
+  .group-section.selected:hover {
+    cursor: default;
+  }
+  
   .group-section.hover-resize {
     cursor: nwse-resize;
   }
@@ -4242,17 +4287,76 @@
     cursor: grabbing;
   }
   
-  .group-resize-handle {
+  /* Edge resize handles - invisible but capture pointer events */
+  .group-resize-edge {
     position: absolute;
-    right: 6px;
-    bottom: 6px;
-    width: 12px;
-    height: 12px;
-    border-radius: 4px;
-    border: 1px solid rgba(255, 255, 255, 0.6);
-    background: rgba(255, 255, 255, 0.2);
-    cursor: se-resize;
     pointer-events: auto;
+    z-index: 10;
+  }
+  
+  .group-resize-edge.edge-n {
+    top: -8px;
+    left: 16px;
+    right: 16px;
+    height: 16px;
+    cursor: ns-resize;
+  }
+  
+  .group-resize-edge.edge-s {
+    bottom: -8px;
+    left: 16px;
+    right: 16px;
+    height: 16px;
+    cursor: ns-resize;
+  }
+  
+  .group-resize-edge.edge-e {
+    right: -8px;
+    top: 16px;
+    bottom: 16px;
+    width: 16px;
+    cursor: ew-resize;
+  }
+  
+  .group-resize-edge.edge-w {
+    left: -8px;
+    top: 16px;
+    bottom: 16px;
+    width: 16px;
+    cursor: ew-resize;
+  }
+  
+  /* Corner resize handles */
+  .group-resize-corner {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    pointer-events: auto;
+    z-index: 11;
+  }
+  
+  .group-resize-corner.corner-nw {
+    top: -8px;
+    left: -8px;
+    cursor: nwse-resize;
+  }
+  
+  .group-resize-corner.corner-ne {
+    top: -8px;
+    right: -8px;
+    cursor: nesw-resize;
+  }
+  
+  .group-resize-corner.corner-sw {
+    bottom: -8px;
+    left: -8px;
+    cursor: nesw-resize;
+  }
+  
+  .group-resize-corner.corner-se {
+    bottom: -8px;
+    right: -8px;
+    cursor: nwse-resize;
   }
   
   .selection-handle {
