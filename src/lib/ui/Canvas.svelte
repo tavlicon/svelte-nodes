@@ -645,8 +645,7 @@
       groupMenuAnchor = null;
     }
     lastMarqueeBoundsWorld = null;
-    const screenX = e.clientX - rect.left;
-    const screenY = e.clientY - rect.top;
+    
     // Use the same rect dimensions for coordinate conversions to ensure consistency
     const viewWidth = rect.width;
     const viewHeight = rect.height;
