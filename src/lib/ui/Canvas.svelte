@@ -1710,6 +1710,70 @@
     menuSourceNodeId = null;
   }
   
+  // Helper function to check if a rectangle overlaps with any existing node
+  function checkOverlap(x: number, y: number, width: number, height: number, excludeNodeId?: string): boolean {
+    const padding = 20; // Minimum gap between nodes
+    for (const node of graphStore.nodes.values()) {
+      if (excludeNodeId && node.id === excludeNodeId) continue;
+      const nodeW = node.width || NODE_SIZE;
+      const nodeH = node.height || NODE_SIZE;
+      // Check if rectangles overlap (with padding)
+      if (
+        x < node.x + nodeW + padding &&
+        x + width + padding > node.x &&
+        y < node.y + nodeH + padding &&
+        y + height + padding > node.y
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Helper function to find a non-overlapping position near the preferred location
+  function findNonOverlappingPosition(
+    preferredX: number,
+    preferredY: number,
+    width: number,
+    height: number,
+    sourceNode: { x: number; y: number; width: number; height: number }
+  ): { x: number; y: number } {
+    // First try the preferred position
+    if (!checkOverlap(preferredX, preferredY, width, height)) {
+      return { x: preferredX, y: preferredY };
+    }
+
+    // Search in expanding rings around the preferred position
+    // Prioritize: right of source, then below, then above
+    const searchStep = 40;
+    const maxSearchRadius = 800;
+
+    // Try positions to the right first (maintaining left-to-right flow)
+    for (let offsetX = 0; offsetX <= maxSearchRadius; offsetX += searchStep) {
+      const testX = preferredX + offsetX;
+      
+      // Try at the preferred Y first
+      if (!checkOverlap(testX, preferredY, width, height)) {
+        return { x: testX, y: preferredY };
+      }
+      
+      // Then try positions above and below
+      for (let offsetY = searchStep; offsetY <= maxSearchRadius; offsetY += searchStep) {
+        // Try below
+        if (!checkOverlap(testX, preferredY + offsetY, width, height)) {
+          return { x: testX, y: preferredY + offsetY };
+        }
+        // Try above
+        if (!checkOverlap(testX, preferredY - offsetY, width, height)) {
+          return { x: testX, y: preferredY - offsetY };
+        }
+      }
+    }
+
+    // Fallback: just use the preferred position (shouldn't happen with reasonable search radius)
+    return { x: preferredX, y: preferredY };
+  }
+
   function handleMenuSelect(nodeType: string) {
     if (!menuSourceNodeId) {
       handleMenuClose();
@@ -1722,28 +1786,20 @@
       return;
     }
     
-    // Calculate position for new node (to the right of source node with gap)
+    // Calculate preferred position for new node (to the right of source node with gap)
     const gap = 60;
-    const newX = sourceNode.x + sourceNode.width + gap;
+    const preferredX = sourceNode.x + sourceNode.width + gap;
+    // Align vertically with source node center
+    const preferredY = sourceNode.y + (sourceNode.height / 2) - (NODE_SIZE / 2);
     
-    // Find existing model/triposr nodes to the right of the source to stack below them
-    const modelNodeTypes = ['model', 'triposr'];
-    const existingModelNodes = Array.from(graphStore.nodes.values())
-      .filter(n => modelNodeTypes.includes(n.type))
-      .filter(n => n.x >= sourceNode.x + sourceNode.width) // To the right of source
-      .sort((a, b) => (a.y + (a.height || NODE_SIZE)) - (b.y + (b.height || NODE_SIZE))); // Sort by bottom edge
-    
-    // Calculate Y position - align with source or stack below existing model nodes
-    let newY: number;
-    if (existingModelNodes.length === 0) {
-      // First model node - align vertically with source node center
-      newY = sourceNode.y + (sourceNode.height / 2) - (NODE_SIZE / 2);
-    } else {
-      // Stack below the lowest existing model node
-      const lowestNode = existingModelNodes[existingModelNodes.length - 1];
-      const lowestNodeHeight = lowestNode.height || NODE_SIZE;
-      newY = lowestNode.y + lowestNodeHeight + 50; // 50px gap to account for node labels
-    }
+    // Find a non-overlapping position near the preferred location
+    const { x: newX, y: newY } = findNonOverlappingPosition(
+      preferredX,
+      preferredY,
+      NODE_SIZE,
+      NODE_SIZE,
+      sourceNode
+    );
     
     let newNodeId: string;
     
