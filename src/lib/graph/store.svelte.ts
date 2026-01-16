@@ -616,17 +616,24 @@ const TIDY_GAP = 20;
 
 // Padding inside group border (in pixels)
 const GROUP_PADDING = 24;
+
+// Container width constraints for row-based packing
+const TIDY_MIN_WIDTH = 300;   // Minimum container width
+const TIDY_MAX_WIDTH = 1600;  // Maximum container width
 // ============================================================================
 
 /**
- * Horizontal 1D even-spacing algorithm for tidying image nodes in a group.
+ * Row-based shelf packing algorithm for tidying image nodes in a group.
+ * 
+ * Preserves left-to-right visual order while packing nodes into rows
+ * that fit within the container width. Similar to how FigJam/Miro tidy.
  * 
  * Algorithm:
- * 1. Sort nodes left-to-right by X position
- * 2. Anchor first node (left edge stays put)
- * 3. Place each subsequent node with a fixed gap (TIDY_GAP)
- * 4. Align all nodes to the top (minimum Y)
- * 5. Resize group to fit tidied nodes
+ * 1. Sort nodes left-to-right by X position (preserve visual order)
+ * 2. Use current group width as container (clamped to min/max)
+ * 3. Pack nodes into rows: fill row left-to-right, wrap to new row when full
+ * 4. Each row is top-aligned, rows stack vertically with gaps
+ * 5. Resize group to fit the packed nodes
  * 
  * @param groupId - The group to tidy
  */
@@ -642,30 +649,67 @@ function tidyGroupNodes(groupId: string): void {
   // Need at least 2 nodes to tidy
   if (imageNodes.length < 2) return;
   
-  // Sort nodes left-to-right by X position
+  // Sort nodes left-to-right by X position (preserves visual order)
   const sorted = [...imageNodes].sort((a, b) => a.x - b.x);
   
-  // Find the topmost Y position (minimum Y)
-  const topY = Math.min(...imageNodes.map(n => n.y));
+  // Calculate container width from current group (minus padding), clamped
+  const currentContentWidth = group.width - GROUP_PADDING * 2;
+  const containerWidth = Math.max(TIDY_MIN_WIDTH, Math.min(TIDY_MAX_WIDTH, currentContentWidth));
+  
+  // Anchor point: top-left of content area
+  const anchorX = Math.min(...imageNodes.map(n => n.x));
+  const anchorY = Math.min(...imageNodes.map(n => n.y));
+  
+  // Row-based shelf packing
+  // Each row: { y: number, height: number, nodes: placement[] }
+  interface Placement {
+    node: NodeInstance;
+    x: number;
+    y: number;
+  }
+  
+  const placements: Placement[] = [];
+  let currentRowY = anchorY;
+  let currentRowX = anchorX;
+  let currentRowHeight = 0;
+  
+  for (const node of sorted) {
+    const nodeWidth = node.width;
+    const nodeHeight = node.height;
+    
+    // Check if node fits in current row
+    const wouldExceedWidth = (currentRowX - anchorX) + nodeWidth > containerWidth;
+    const isFirstInRow = currentRowX === anchorX;
+    
+    // If doesn't fit and not first in row, start new row
+    if (wouldExceedWidth && !isFirstInRow) {
+      // Move to next row
+      currentRowY += currentRowHeight + TIDY_GAP;
+      currentRowX = anchorX;
+      currentRowHeight = 0;
+    }
+    
+    // Place node at current position
+    placements.push({
+      node,
+      x: Math.round(currentRowX),
+      y: Math.round(currentRowY),
+    });
+    
+    // Update row tracking
+    currentRowHeight = Math.max(currentRowHeight, nodeHeight);
+    currentRowX += nodeWidth + TIDY_GAP;
+  }
   
   // Record original positions for undo
   const moves: Array<{ id: string; fromX: number; fromY: number; toX: number; toY: number }> = [];
   
-  // Anchor point: first node's left edge
-  let currentX = sorted[0].x;
-  
   // Single Yjs transaction for all node updates
   ydoc.transact(() => {
-    for (const node of sorted) {
+    for (const placement of placements) {
+      const { node, x: toX, y: toY } = placement;
       const fromX = node.x;
       const fromY = node.y;
-      
-      // New X position, align Y to top
-      const toX = Math.round(currentX);
-      const toY = topY;
-      
-      // Advance X for next node: current node's width + gap
-      currentX += node.width + TIDY_GAP;
       
       // Only update if position changed
       if (toX !== fromX || toY !== fromY) {
