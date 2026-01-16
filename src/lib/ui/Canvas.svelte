@@ -1192,13 +1192,27 @@
     containerElement.releasePointerCapture(e.pointerId);
 
     if (groupResizeId) {
-      if (groupResizeStartBounds) {
-        const group = graphStore.groups.get(groupResizeId);
-        if (group) {
+      const group = graphStore.groups.get(groupResizeId);
+      if (group) {
+        // Update membership based on new bounds - remove nodes that are no longer inside
+        const groupBounds = {
+          minX: group.x,
+          minY: group.y,
+          maxX: group.x + group.width,
+          maxY: group.y + group.height,
+        };
+        const nodesStillInGroup = getImageNodesInBounds(groupBounds);
+        const updatedMembers = group.memberIds.filter(id => nodesStillInGroup.includes(id));
+        
+        if (updatedMembers.length !== group.memberIds.length) {
+          graphStore.setGroupMembers(groupResizeId, updatedMembers);
+        }
+        
+        if (groupResizeStartBounds) {
           graphStore.recordGroupChange(
             groupResizeId,
             { ...group, ...groupResizeStartBounds },
-            group
+            { ...group, memberIds: updatedMembers }
           );
         }
       }
