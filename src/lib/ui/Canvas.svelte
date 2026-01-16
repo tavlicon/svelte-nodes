@@ -3005,7 +3005,7 @@
   {#if groupSelectionBounds}
     <div
       class="group-selection-bounds"
-      style={`left: ${groupSelectionBounds.x}px; top: ${groupSelectionBounds.y}px; width: ${groupSelectionBounds.width}px; height: ${groupSelectionBounds.height}px; border-radius: ${groupSelectionBounds.borderRadius}px; border-width: ${groupSelectionBounds.borderWidth}px;`}
+      style={`transform: translate(${groupSelectionBounds.x}px, ${groupSelectionBounds.y}px); width: ${groupSelectionBounds.width}px; height: ${groupSelectionBounds.height}px; border-radius: ${groupSelectionBounds.borderRadius}px; border-width: ${groupSelectionBounds.borderWidth}px;`}
     ></div>
   {/if}
   
@@ -3014,7 +3014,7 @@
       class="group-section"
       class:selected={group.isSelected}
       class:hover-resize={groupHoveringResize && groupHoverResizeId === group.id}
-      style={`left: ${group.screenX}px; top: ${group.screenY}px; width: ${group.screenWidth}px; height: ${group.screenHeight}px; border-radius: ${group.borderRadius}px;`}
+      style={`transform: translate(${group.screenX}px, ${group.screenY}px); width: ${group.screenWidth}px; height: ${group.screenHeight}px; border-radius: ${group.borderRadius}px;`}
       onpointerdown={(e) => handleGroupPointerDown(e, group.id)}
       onpointermove={(e) => handleGroupPointerMove(e, group.id)}
       onpointerleave={() => handleGroupPointerLeave(group.id)}
@@ -3047,7 +3047,7 @@
       class="image-node-wrapper"
       class:selected={img.isSelected}
       class:hovered={img.isHovered}
-      style={`left: ${img.screenX}px; top: ${img.screenY}px;`}
+      style={`transform: translate(${img.screenX}px, ${img.screenY}px);`}
     >
       <div
         class="image-node-overlay"
@@ -3119,7 +3119,7 @@
       class="model-node-wrapper"
       class:selected={model.isSelected}
       class:hovered={model.isHovered}
-      style={`left: ${model.screenX}px; top: ${model.screenY}px;`}
+      style={`transform: translate(${model.screenX}px, ${model.screenY}px);`}
     >
     <div
       class="model-node-overlay"
@@ -3191,7 +3191,7 @@
       class="image-node-wrapper"
       class:selected={output.isSelected}
       class:hovered={output.isHovered}
-      style={`left: ${output.screenX}px; top: ${output.screenY}px;`}
+      style={`transform: translate(${output.screenX}px, ${output.screenY}px);`}
     >
       <div
         class="output-node-overlay"
@@ -3262,7 +3262,7 @@
       class="image-node-wrapper"
       class:selected={meshNode.isSelected}
       class:hovered={meshNode.isHovered}
-      style={`left: ${meshNode.screenX}px; top: ${meshNode.screenY}px;`}
+      style={`transform: translate(${meshNode.screenX}px, ${meshNode.screenY}px);`}
     >
       <div
         class="mesh-node-overlay"
@@ -3387,7 +3387,7 @@
       class:type-tensor={port.type === 'tensor'}
       class:type-number={port.type === 'number'}
       class:type-mesh={port.type === 'mesh'}
-      style={`left: ${port.screenX}px; top: ${port.screenY}px;`}
+      style={`transform: translate(${port.screenX}px, ${port.screenY}px);`}
     ></div>
   {/each}
   
@@ -3419,21 +3419,21 @@
   {#if mode === 'marquee' && marqueeStartScreen && marqueeCurrentScreen}
     <div
       class="marquee-rect"
-      style={`left: ${Math.min(marqueeStartScreen.x, marqueeCurrentScreen.x)}px; top: ${Math.min(marqueeStartScreen.y, marqueeCurrentScreen.y)}px; width: ${Math.abs(marqueeCurrentScreen.x - marqueeStartScreen.x)}px; height: ${Math.abs(marqueeCurrentScreen.y - marqueeStartScreen.y)}px;`}
+      style={`transform: translate(${Math.min(marqueeStartScreen.x, marqueeCurrentScreen.x)}px, ${Math.min(marqueeStartScreen.y, marqueeCurrentScreen.y)}px); width: ${Math.abs(marqueeCurrentScreen.x - marqueeStartScreen.x)}px; height: ${Math.abs(marqueeCurrentScreen.y - marqueeStartScreen.y)}px;`}
     ></div>
   {/if}
   
   {#if hoverBounds}
     <div
       class="hover-bounds"
-      style={`left: ${hoverBounds.x}px; top: ${hoverBounds.y}px; width: ${hoverBounds.width}px; height: ${hoverBounds.height}px;`}
+      style={`transform: translate(${hoverBounds.x}px, ${hoverBounds.y}px); width: ${hoverBounds.width}px; height: ${hoverBounds.height}px;`}
     ></div>
   {/if}
   
   {#if selectionBounds}
     <div
       class="selection-bounds"
-      style={`left: ${selectionBounds.x}px; top: ${selectionBounds.y}px; width: ${selectionBounds.width}px; height: ${selectionBounds.height}px; border-radius: ${selectionBounds.borderRadius}px; border-width: ${selectionBounds.borderWidth}px;`}
+      style={`transform: translate(${selectionBounds.x}px, ${selectionBounds.y}px); width: ${selectionBounds.width}px; height: ${selectionBounds.height}px; border-radius: ${selectionBounds.borderRadius}px; border-width: ${selectionBounds.borderWidth}px;`}
     ></div>
   {/if}
   
@@ -3539,13 +3539,17 @@
   
   .port-overlay {
     position: absolute;
+    top: 0;
+    left: 0;
     width: 10px;
     height: 10px;
     border-radius: 50%;
-    transform: translate(-50%, -50%);
+    margin-left: -5px; /* Center the port (half of width) */
+    margin-top: -5px; /* Center the port (half of height) */
     pointer-events: none;
     z-index: 20;
     background: rgba(255, 255, 255, 0.3);
+    will-change: transform;
     border: 1px solid rgba(255, 255, 255, 0.5);
     transition: transform 0.1s ease, background 0.1s ease, opacity 0.1s ease;
     opacity: 0.6;
@@ -3579,7 +3583,7 @@
   .port-overlay.highlighted {
     background: #ffffff;
     border-color: #ffffff;
-    transform: translate(-50%, -50%) scale(1.4);
+    transform: scale(1.4);
     opacity: 1;
   }
   
@@ -3643,10 +3647,13 @@
   /* Image node wrapper - contains image + connector + filename */
   .image-node-wrapper {
     position: absolute;
+    top: 0;
+    left: 0;
     z-index: 20; /* Above connection-line-overlay (z-index: 15) so connector icon is clickable */
     pointer-events: none;
     background: transparent;
-    will-change: left, top, width, height; /* GPU hint for smooth animations */
+    will-change: transform; /* GPU hint for smooth transform animations */
+    contain: layout style; /* Optimize layout calculations */
   }
   
   .image-node-overlay {
@@ -3817,10 +3824,13 @@
   /* Model node wrapper - contains model + error tooltip */
   .model-node-wrapper {
     position: absolute;
+    top: 0;
+    left: 0;
     z-index: 20; /* Above connection-line-overlay (z-index: 15) so connector icon is clickable */
     pointer-events: none;
     background: transparent;
-    will-change: left, top, width, height; /* GPU hint for smooth animations */
+    will-change: transform; /* GPU hint for smooth transform animations */
+    contain: layout style; /* Optimize layout calculations */
   }
   
   .model-node-overlay {
@@ -4254,19 +4264,25 @@
   
   .marquee-rect {
     position: absolute;
+    top: 0;
+    left: 0;
     border: 1px dashed rgba(255, 255, 255, 0.7);
     background: rgba(99, 102, 241, 0.1);
     pointer-events: none;
     border-radius: 4px;
+    will-change: transform;
   }
 
   .group-selection-bounds {
     position: absolute;
+    top: 0;
+    left: 0;
     border-style: solid;
     border-color: rgba(255, 255, 255, 0.6);
     background: rgba(255, 255, 255, 0.03);
     pointer-events: none;
     z-index: 12;
+    will-change: transform;
   }
   
   /* Hover bounds - hidden for new design (handled by node overlay) */
@@ -4281,10 +4297,14 @@
 
   .group-section {
     position: absolute;
+    top: 0;
+    left: 0;
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.15);
     z-index: 12;
     pointer-events: auto;
+    will-change: transform;
+    contain: layout style;
   }
   
   .group-section.selected {
