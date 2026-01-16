@@ -534,16 +534,16 @@
       return;
     }
     
-    // Zoom in: Cmd/Ctrl + = or Cmd/Ctrl + +
-    if ((e.key === '=' || e.key === '+') && (e.metaKey || e.ctrlKey) && !isInInput) {
+    // Zoom in: Cmd/Ctrl + = or Cmd/Ctrl + + (use code for better cross-platform support)
+    if ((e.code === 'Equal' || e.key === '+') && (e.metaKey || e.ctrlKey) && !isInInput) {
       e.preventDefault();
       e.stopPropagation();
       animateCameraTo({ zoom: Math.min(5, graphStore.camera.zoom * 1.2) }, 200);
       return;
     }
     
-    // Zoom out: Cmd/Ctrl + -
-    if (e.key === '-' && (e.metaKey || e.ctrlKey) && !isInInput) {
+    // Zoom out: Cmd/Ctrl + - (use code for better cross-platform support)
+    if (e.code === 'Minus' && (e.metaKey || e.ctrlKey) && !isInInput) {
       e.preventDefault();
       e.stopPropagation();
       animateCameraTo({ zoom: Math.max(MIN_ZOOM, graphStore.camera.zoom * 0.8) }, 200);
@@ -594,18 +594,50 @@
       isOverConnectorIcon = null;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !isInInput) {
+      // Collect all node IDs to delete
+      const nodesToDelete = new Set<string>();
+      const groupsToDelete = new Set<string>();
+      
+      // If a group is explicitly selected, delete it and its members
       if (selectedGroupId) {
-        graphStore.deleteGroup(selectedGroupId);
+        const group = graphStore.groups.get(selectedGroupId);
+        if (group) {
+          group.memberIds.forEach(id => nodesToDelete.add(id));
+          groupsToDelete.add(selectedGroupId);
+        }
         selectedGroupId = null;
       }
-      // Delete selected nodes
-      if (graphStore.selectedNodeIds.size > 0) {
-        graphStore.selectedNodeIds.forEach(id => graphStore.deleteNode(id));
-      }
+      
+      // Add selected nodes to delete set
+      graphStore.selectedNodeIds.forEach(id => nodesToDelete.add(id));
+      
+      // Check if any groups should be deleted because ALL their members are being deleted
+      graphStore.groups.forEach((group, groupId) => {
+        if (group.memberIds.length > 0) {
+          const allMembersSelected = group.memberIds.every(memberId => nodesToDelete.has(memberId));
+          if (allMembersSelected) {
+            groupsToDelete.add(groupId);
+          }
+        }
+      });
+      
+      // Delete all collected nodes
+      nodesToDelete.forEach(id => graphStore.deleteNode(id));
+      
+      // Delete all collected groups
+      groupsToDelete.forEach(id => graphStore.deleteGroup(id));
+      
       // Delete selected edges
       if (graphStore.selectedEdgeIds.size > 0) {
         graphStore.selectedEdgeIds.forEach(id => graphStore.deleteEdge(id));
         graphStore.selectedEdgeIds = new Set();
+      }
+      
+      // Close group menu/side nav after deletion
+      if (nodesToDelete.size > 0 || groupsToDelete.size > 0) {
+        groupMenuOpen = false;
+        groupMenuAnchor = null;
+        hoveredGroupId = null;
       }
     }
   }
@@ -1502,8 +1534,8 @@
   function handleWheel(e: WheelEvent) {
     e.preventDefault();
     
-    // Block zoom/pan when menu is open
-    if (menuOpen || groupMenuOpen) return;
+    // Block zoom/pan when canvas menu is open (but allow when group menu is open)
+    if (menuOpen) return;
     
     // Use the same rect for mouse position and dimensions
     const rect = canvasElement.getBoundingClientRect();
