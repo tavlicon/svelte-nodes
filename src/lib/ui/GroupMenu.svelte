@@ -76,7 +76,8 @@
   
   .group-menu-backdrop.visible {
     opacity: 1;
-    pointer-events: auto;
+    /* Don't block pointer events on the backdrop - only the menu itself should capture events */
+    pointer-events: none;
   }
 
   .group-menu {
@@ -92,6 +93,7 @@
     min-width: 140px;
     transform: translateY(4px);
     opacity: 0;
+    pointer-events: auto;
     transition: opacity 140ms cubic-bezier(0.0, 0, 0.2, 1), transform 140ms cubic-bezier(0.0, 0, 0.2, 1);
   }
   

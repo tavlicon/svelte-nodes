@@ -1228,17 +1228,23 @@
     if (groupResizeId) {
       const group = graphStore.groups.get(groupResizeId);
       if (group) {
-        // Update membership based on new bounds - remove nodes that are no longer inside
+        // Update membership based on new bounds
         const groupBounds = {
           minX: group.x,
           minY: group.y,
           maxX: group.x + group.width,
           maxY: group.y + group.height,
         };
-        const nodesStillInGroup = getImageNodesInBounds(groupBounds);
-        const updatedMembers = group.memberIds.filter(id => nodesStillInGroup.includes(id));
+        // Get all image nodes currently inside the group bounds
+        const nodesInBounds = getImageNodesInBounds(groupBounds);
+        // New members = nodes that are inside bounds (includes existing + newly added)
+        const updatedMembers = Array.from(new Set(nodesInBounds));
         
-        if (updatedMembers.length !== group.memberIds.length) {
+        const membersChanged = updatedMembers.length !== group.memberIds.length ||
+          updatedMembers.some(id => !group.memberIds.includes(id)) ||
+          group.memberIds.some(id => !updatedMembers.includes(id));
+        
+        if (membersChanged) {
           graphStore.setGroupMembers(groupResizeId, updatedMembers);
         }
         
