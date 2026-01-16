@@ -179,8 +179,17 @@ export class Canvas2DRenderer {
   }
   
   private drawGrid(ctx: CanvasRenderingContext2D, camera: Camera) {
-    // Fixed spacing like Flora - no adaptive changes for visual consistency
-    const spacing = 50;
+    // Dots only visible when zoomed in (above 80%)
+    // Invisible at zoom <= 0.8, gradually visible as zoom increases to max (5.0)
+    if (camera.zoom <= 0.8) return; // Skip rendering entirely for performance
+    
+    // Calculate alpha based on zoom (higher zoom = more visible)
+    // Linear interpolation from 0.8 (invisible) to 5.0 (max alpha)
+    const maxZoom = 5.0;
+    const alpha = Math.min(0.25, (camera.zoom - 0.8) / (maxZoom - 0.8) * 0.25);
+    
+    // Increased density: 50% more dense than before (spacing = 28 / 1.5 ≈ 19)
+    const spacing = 19;
     
     // Calculate visible area in world coordinates (top-left anchored)
     const viewportW = this.width / camera.zoom;
@@ -190,13 +199,10 @@ export class Canvas2DRenderer {
     const startY = Math.floor(-camera.y / spacing) * spacing;
     const endY = Math.ceil((-camera.y + viewportH) / spacing) * spacing;
     
-    // Very small dots like Flora (~1px on screen)
+    // Very small dots (~1px on screen)
     const dotRadius = 1 / camera.zoom;
     
-    // Subtle opacity like Flora
-    const alpha = 0.2;
-    
-    // Use subtle gray color
+    // Use subtle gray color with calculated alpha
     ctx.fillStyle = `rgba(128, 128, 128, ${alpha})`;
     
     // Draw dots

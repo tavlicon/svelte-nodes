@@ -34,6 +34,16 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
   let zoom = camera.viewport.z;
   let viewport = camera.viewport.xy;
   
+  // Dots only visible when zoomed in (above 80%)
+  // Invisible at zoom <= 0.8, gradually visible as zoom increases to max (5.0)
+  if (zoom <= 0.8) {
+    return vec4f(0.0, 0.0, 0.0, 0.0); // Fully transparent
+  }
+  
+  // Calculate visibility factor (0 at zoom=0.8, 1 at zoom>=5.0)
+  let maxZoom = 5.0;
+  let visibilityFactor = clamp((zoom - 0.8) / (maxZoom - 0.8), 0.0, 1.0);
+  
   // Extract camera from the view-projection matrix
   // Matrix structure (column-major):
   //   [scaleX,      0,    0, 0]
@@ -56,24 +66,33 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
   let screenPos = in.uv * viewport; // Screen position in device pixels
   let worldPos = screenPos / effectiveZoom - vec2f(cameraX, cameraY);
   
-  // Fixed grid spacing like Flora - no adaptive changes
-  let spacing = 50.0;
+  // Increased density: 50% more dense (spacing = 28 / 1.5 ≈ 19)
+  let spacing = 19.0;
   
   // Calculate distance to nearest grid point
   let gridPos = worldPos / spacing;
   let nearest = round(gridPos) * spacing;
   let dist = length(worldPos - nearest);
   
-  // Very small dots like Flora (~1px on screen regardless of zoom)
+  // Very small dots (~1px on screen regardless of zoom)
   let dotRadius = 1.0 / zoom;
   let smoothness = 0.3 / zoom;
   
   // Anti-aliased dot
   let alpha = 1.0 - smoothstep(dotRadius - smoothness, dotRadius + smoothness, dist);
   
-  // Subtle gray color like Flora
+  // ============================================================
+  // DOT COLOR - Edit this RGB value to change dot color
+  // Format: vec3f(R, G, B) where values are 0.0 to 1.0
+  // Examples:
+  //   vec3f(0.5, 0.5, 0.5)  = gray (#808080)
+  //   vec3f(0.0, 0.0, 0.0)  = black (#000000)
+  //   vec3f(1.0, 1.0, 1.0)  = white (#FFFFFF)
+  //   vec3f(0.4, 0.4, 0.5)  = blue-gray (#6666880)
+  // ============================================================
   let dotColor = vec3f(0.5, 0.5, 0.5);
   
-  // Very subtle opacity
-  return vec4f(dotColor, alpha * 0.2);
+  // Apply visibility factor based on zoom
+  // Max alpha is 0.25 - increase this value for more visible dots
+  return vec4f(dotColor, alpha * 0.25 * visibilityFactor);
 }
