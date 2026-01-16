@@ -265,13 +265,14 @@
   });
   
   // Reset camera when becoming visible (for seamless thumbnail-to-animation transition)
-  let prevVisible = visible;
+  let prevVisible = $state(false);
   $effect(() => {
-    if (visible && !prevVisible && isInitialized) {
+    const wasVisible = prevVisible;
+    prevVisible = visible;
+    if (visible && !wasVisible && isInitialized) {
       // Just became visible - reset to starting position
       resetCamera();
     }
-    prevVisible = visible;
   });
   
   // Cleanup on destroy

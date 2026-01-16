@@ -525,7 +525,7 @@
                               muted 
                               playsinline
                               draggable="false"
-                            />
+                            ></video>
                             <span class="mesh-label">3D</span>
                           </div>
                         {:else if thumbnailUrl && thumbnailUrl !== 'loading'}
@@ -578,7 +578,7 @@
                           muted 
                           playsinline
                           draggable="false"
-                        />
+                        ></video>
                         <span class="video-label">3D</span>
                       </div>
                     </button>
@@ -757,7 +757,7 @@
 <!-- 3D Mesh Preview Modal -->
 {#if previewMeshUrl}
   <div class="mesh-preview-modal" onclick={() => previewMeshUrl = null} onkeydown={(e) => e.key === 'Escape' && (previewMeshUrl = null)} role="button" tabindex="0">
-    <div class="mesh-preview-content" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="3D Preview">
+    <div class="mesh-preview-content" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" aria-label="3D Preview" tabindex="0">
       <div class="mesh-preview-header">
         <h3>3D Preview</h3>
         <span class="mesh-filename">{previewMeshName}</span>
@@ -788,7 +788,7 @@
 <!-- Video Preview Modal -->
 {#if previewVideoUrl}
   <div class="video-preview-modal" onclick={() => previewVideoUrl = null} onkeydown={(e) => e.key === 'Escape' && (previewVideoUrl = null)} role="button" tabindex="0">
-    <div class="video-preview-content" onclick={(e) => e.stopPropagation()} role="dialog" aria-label="Video Preview">
+    <div class="video-preview-content" onclick={(e) => e.stopPropagation()} onkeydown={(e) => e.stopPropagation()} role="dialog" aria-label="Video Preview" tabindex="0">
       <div class="video-preview-header">
         <h3>Turntable Preview</h3>
         <span class="video-filename">{previewVideoName}</span>
@@ -807,7 +807,7 @@
           muted 
           playsinline
           controls
-        />
+        ></video>
       </div>
       <div class="video-preview-actions">
         <a href={previewVideoUrl} download={previewVideoName} class="video-download-btn-large">
@@ -1223,10 +1223,6 @@
   }
   
   @media (max-width: 800px) {
-    .floating-panel {
-      width: 360px;
-    }
-    
     .file-grid {
       grid-template-columns: repeat(2, 1fr);
     }
@@ -1296,10 +1292,6 @@
     color: #4da6ff;
   }
   
-  .mesh-thumbnail svg {
-    opacity: 0.8;
-  }
-  
   /* GLB thumbnail (generated from Three.js) */
   .glb-thumbnail {
     position: relative;
@@ -1348,10 +1340,6 @@
     background: linear-gradient(135deg, #234b75 0%, #1e3a5f 100%);
   }
   
-  .mesh-card-wrapper:hover .mesh-thumbnail svg {
-    opacity: 1;
-  }
-  
   .mesh-preview-btn {
     position: absolute;
     top: 6px;
@@ -1378,11 +1366,6 @@
   .mesh-preview-btn:hover {
     background: rgba(99, 102, 241, 0.9);
     color: white;
-  }
-  
-  /* Hidden by default - only shown when needed */
-  .file-info {
-    display: none;
   }
   
   .file-size {
@@ -1534,11 +1517,6 @@
   .mesh-download-btn:hover {
     background: var(--accent-primary-hover, #5855e0);
     transform: translateY(-1px);
-  }
-  
-  /* Video card styles */
-  .video-card-wrapper {
-    position: relative;
   }
   
   .video-card {

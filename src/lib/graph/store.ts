@@ -7,6 +7,7 @@ import {
   type NodeInstance, 
   type Edge, 
   type GraphState, 
+  type GroupSection,
   type Camera,
   type CanvasState,
   generateId 
@@ -18,10 +19,12 @@ const ydoc = new Y.Doc();
 // Yjs shared types
 const yNodes = ydoc.getMap<NodeInstance>('nodes');
 const yEdges = ydoc.getMap<Edge>('edges');
+const yGroups = ydoc.getMap<GroupSection>('groups');
 
 // Reactive state using Svelte 5 runes
 let nodes = $state<Map<string, NodeInstance>>(new Map());
 let edges = $state<Map<string, Edge>>(new Map());
+let groups = $state<Map<string, GroupSection>>(new Map());
 let selectedNodeIds = $state<Set<string>>(new Set());
 let selectedEdgeIds = $state<Set<string>>(new Set());
 let camera = $state<Camera>({ x: 0, y: 0, zoom: 1 });
@@ -44,11 +47,18 @@ function syncFromYjs() {
     newEdges.set(id, { ...edge });
   });
   edges = newEdges;
+
+  const newGroups = new Map<string, GroupSection>();
+  yGroups.forEach((group, id) => {
+    newGroups.set(id, { ...group });
+  });
+  groups = newGroups;
 }
 
 // Set up observers
 yNodes.observe(() => syncFromYjs());
 yEdges.observe(() => syncFromYjs());
+yGroups.observe(() => syncFromYjs());
 
 // Graph manipulation functions
 function addNode(type: string, x: number, y: number, params: Record<string, unknown> = {}): string {
@@ -217,6 +227,7 @@ function getState(): GraphState {
   return {
     nodes,
     edges,
+    groups,
     selectedNodeIds,
     selectedEdgeIds,
   };
@@ -226,6 +237,7 @@ function getState(): GraphState {
 export const graphStore = {
   get nodes() { return nodes; },
   get edges() { return edges; },
+  get groups() { return groups; },
   get selectedNodeIds() { return selectedNodeIds; },
   get selectedEdgeIds() { return selectedEdgeIds; },
   get camera() { return camera; },

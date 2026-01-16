@@ -199,12 +199,12 @@
               <h3 class="section-title">Conditioning</h3>
               <div class="param-group">
                 <div class="param-field">
-                  <label class="param-label">Positive Prompt</label>
-                  <textarea class="param-textarea" readonly>{mockNodeData.params.positive_prompt}</textarea>
+                  <label class="param-label" for="demo-positive-prompt">Positive Prompt</label>
+                  <textarea id="demo-positive-prompt" class="param-textarea" readonly>{mockNodeData.params.positive_prompt}</textarea>
                 </div>
                 <div class="param-field">
-                  <label class="param-label">Negative Prompt</label>
-                  <textarea class="param-textarea" readonly>{mockNodeData.params.negative_prompt}</textarea>
+                  <label class="param-label" for="demo-negative-prompt">Negative Prompt</label>
+                  <textarea id="demo-negative-prompt" class="param-textarea" readonly>{mockNodeData.params.negative_prompt}</textarea>
                 </div>
               </div>
             </section>
@@ -214,39 +214,39 @@
               <h3 class="section-title">Sampler Parameters</h3>
               <div class="param-group">
                 <div class="param-field">
-                  <label class="param-label">Seed</label>
-                  <input type="number" class="param-input" value={mockNodeData.params.seed} readonly />
+                  <label class="param-label" for="demo-seed">Seed</label>
+                  <input id="demo-seed" type="number" class="param-input" value={mockNodeData.params.seed} readonly />
                 </div>
                 <div class="param-field">
-                  <label class="param-label">Steps</label>
+                  <label class="param-label" for="demo-steps">Steps</label>
                   <div class="slider-row">
-                    <input type="range" class="param-slider" min="1" max="50" value={mockNodeData.params.steps} disabled />
+                    <input id="demo-steps" type="range" class="param-slider" min="1" max="50" value={mockNodeData.params.steps} disabled />
                     <span class="slider-value">{mockNodeData.params.steps}</span>
                   </div>
                 </div>
                 <div class="param-field">
-                  <label class="param-label">CFG Scale</label>
+                  <label class="param-label" for="demo-cfg">CFG Scale</label>
                   <div class="slider-row">
-                    <input type="range" class="param-slider" min="1" max="20" step="0.5" value={mockNodeData.params.cfg} disabled />
+                    <input id="demo-cfg" type="range" class="param-slider" min="1" max="20" step="0.5" value={mockNodeData.params.cfg} disabled />
                     <span class="slider-value">{mockNodeData.params.cfg}</span>
                   </div>
                 </div>
                 <div class="param-field">
-                  <label class="param-label">Sampler</label>
-                  <select class="param-select" disabled>
+                  <label class="param-label" for="demo-sampler">Sampler</label>
+                  <select id="demo-sampler" class="param-select" disabled>
                     <option value="euler_a" selected>Euler Ancestral</option>
                   </select>
                 </div>
                 <div class="param-field">
-                  <label class="param-label">Scheduler</label>
-                  <select class="param-select" disabled>
+                  <label class="param-label" for="demo-scheduler">Scheduler</label>
+                  <select id="demo-scheduler" class="param-select" disabled>
                     <option value="normal" selected>Normal</option>
                   </select>
                 </div>
                 <div class="param-field">
-                  <label class="param-label">Denoise</label>
+                  <label class="param-label" for="demo-denoise">Denoise</label>
                   <div class="slider-row">
-                    <input type="range" class="param-slider" min="0" max="1" step="0.01" value={mockNodeData.params.denoise} disabled />
+                    <input id="demo-denoise" type="range" class="param-slider" min="0" max="1" step="0.01" value={mockNodeData.params.denoise} disabled />
                     <span class="slider-value">{mockNodeData.params.denoise}</span>
                   </div>
                 </div>
@@ -485,12 +485,6 @@
     align-items: center;
     justify-content: center;
     color: rgba(255, 255, 255, 0.2);
-  }
-  
-  .file-thumbnail img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
   }
   
   /* File list for models */

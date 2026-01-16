@@ -43,9 +43,20 @@ export interface Edge {
   targetPortId: string;
 }
 
+export interface GroupSection {
+  id: string;
+  name: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  memberIds: string[];
+}
+
 export interface GraphState {
   nodes: Map<string, NodeInstance>;
   edges: Map<string, Edge>;
+  groups: Map<string, GroupSection>;
   selectedNodeIds: Set<string>;
   selectedEdgeIds: Set<string>;
 }

@@ -7,6 +7,7 @@ import {
   type NodeInstance, 
   type Edge, 
   type GraphState, 
+  type GroupSection,
   type Camera,
   type CanvasState,
   generateId 
@@ -19,10 +20,12 @@ const ydoc = new Y.Doc();
 // Yjs shared types
 const yNodes = ydoc.getMap<NodeInstance>('nodes');
 const yEdges = ydoc.getMap<Edge>('edges');
+const yGroups = ydoc.getMap<GroupSection>('groups');
 
 // Reactive state using Svelte 5 runes
 let nodes = $state<Map<string, NodeInstance>>(new Map());
 let edges = $state<Map<string, Edge>>(new Map());
+let groups = $state<Map<string, GroupSection>>(new Map());
 let selectedNodeIds = $state<Set<string>>(new Set());
 let selectedEdgeIds = $state<Set<string>>(new Set());
 let camera = $state<Camera>({ x: 0, y: 0, zoom: 1 });
@@ -32,8 +35,9 @@ let canvasState = $state<CanvasState>({
   isConnecting: false,
 });
 
-// Version counter to force reactivity updates (declared early for syncFromYjs)
+// Version counters to force reactivity updates (declared early for syncFromYjs)
 let nodesVersion = $state(0);
+let groupsVersion = $state(0);
 
 // Undo/Redo system - limited to 5 actions
 const MAX_HISTORY = 5;
@@ -43,7 +47,10 @@ type Action =
   | { type: 'delete_node'; node: NodeInstance; connectedEdges: Edge[] }
   | { type: 'move_nodes'; moves: Array<{ id: string; fromX: number; fromY: number; toX: number; toY: number }> }
   | { type: 'add_edge'; edge: Edge }
-  | { type: 'delete_edge'; edge: Edge };
+  | { type: 'delete_edge'; edge: Edge }
+  | { type: 'add_group'; group: GroupSection }
+  | { type: 'delete_group'; group: GroupSection }
+  | { type: 'update_group'; groupId: string; from: GroupSection; to: GroupSection };
 
 let undoStack = $state<Action[]>([]);
 let redoStack = $state<Action[]>([]);
@@ -109,6 +116,24 @@ function undo() {
         yEdges.set(action.edge.id, action.edge);
       });
       break;
+      
+    case 'add_group':
+      ydoc.transact(() => {
+        yGroups.delete(action.group.id);
+      });
+      break;
+      
+    case 'delete_group':
+      ydoc.transact(() => {
+        yGroups.set(action.group.id, action.group);
+      });
+      break;
+      
+    case 'update_group':
+      ydoc.transact(() => {
+        yGroups.set(action.groupId, action.from);
+      });
+      break;
   }
   
   isUndoRedo = false;
@@ -166,6 +191,24 @@ function redo() {
         yEdges.delete(action.edge.id);
       });
       break;
+      
+    case 'add_group':
+      ydoc.transact(() => {
+        yGroups.set(action.group.id, action.group);
+      });
+      break;
+      
+    case 'delete_group':
+      ydoc.transact(() => {
+        yGroups.delete(action.group.id);
+      });
+      break;
+      
+    case 'update_group':
+      ydoc.transact(() => {
+        yGroups.set(action.groupId, action.to);
+      });
+      break;
   }
   
   isUndoRedo = false;
@@ -186,11 +229,19 @@ function syncFromYjs() {
     newEdges.set(id, { ...edge });
   });
   edges = newEdges;
+
+  const newGroups = new Map<string, GroupSection>();
+  yGroups.forEach((group, id) => {
+    newGroups.set(id, { ...group });
+  });
+  groups = newGroups;
+  groupsVersion++;
 }
 
 // Set up observers
 yNodes.observe(() => syncFromYjs());
 yEdges.observe(() => syncFromYjs());
+yGroups.observe(() => syncFromYjs());
 
 // Node size constant - square nodes like FigJam
 const NODE_SIZE = 200;
@@ -236,6 +287,91 @@ function addNode(
   pushAction({ type: 'add_node', node });
   
   return id;
+}
+
+function addGroup(
+  x: number,
+  y: number,
+  width: number,
+  height: number,
+  memberIds: string[],
+  name = 'Group'
+): string {
+  const id = generateId();
+  const uniqueMembers = Array.from(new Set(memberIds));
+  const group: GroupSection = {
+    id,
+    name,
+    x,
+    y,
+    width,
+    height,
+    memberIds: uniqueMembers,
+  };
+  
+  // Optimistically update local state for immediate feedback
+  groups = new Map(groups).set(id, group);
+  groupsVersion++;
+  
+  ydoc.transact(() => {
+    yGroups.set(id, group);
+  });
+  
+  pushAction({ type: 'add_group', group });
+  
+  return id;
+}
+
+function updateGroup(id: string, updates: Partial<GroupSection>) {
+  const existing = yGroups.get(id);
+  if (existing) {
+    const updated = { ...existing, ...updates };
+    groups = new Map(groups).set(id, updated);
+    groupsVersion++;
+    ydoc.transact(() => {
+      yGroups.set(id, updated);
+    });
+  }
+}
+
+function setGroupMembers(id: string, memberIds: string[]) {
+  const existing = yGroups.get(id);
+  if (existing) {
+    const uniqueMembers = Array.from(new Set(memberIds));
+    const updated = { ...existing, memberIds: uniqueMembers };
+    groups = new Map(groups).set(id, updated);
+    groupsVersion++;
+    ydoc.transact(() => {
+      yGroups.set(id, updated);
+    });
+  }
+}
+
+function deleteGroup(id: string) {
+  const existing = yGroups.get(id);
+  if (existing) {
+    ydoc.transact(() => {
+      yGroups.delete(id);
+    });
+    groups = new Map(groups);
+    groups.delete(id);
+    groupsVersion++;
+    pushAction({ type: 'delete_group', group: existing });
+  }
+}
+
+function recordGroupChange(groupId: string, from: GroupSection, to: GroupSection) {
+  if (isUndoRedo) return;
+  const hasChanged =
+    from.x !== to.x ||
+    from.y !== to.y ||
+    from.width !== to.width ||
+    from.height !== to.height ||
+    from.name !== to.name ||
+    from.memberIds.join(',') !== to.memberIds.join(',');
+  if (hasChanged) {
+    pushAction({ type: 'update_group', groupId, from, to });
+  }
 }
 
 function updateNode(id: string, updates: Partial<NodeInstance>) {
@@ -465,6 +601,7 @@ function getState(): GraphState {
   return {
     nodes,
     edges,
+    groups,
     selectedNodeIds,
     selectedEdgeIds,
   };
@@ -493,10 +630,15 @@ export function getNodesVersion() {
   return nodesVersion;
 }
 
+export function getGroupsVersion() {
+  return groupsVersion;
+}
+
 // Export reactive store
 export const graphStore = {
   get nodes() { return nodes; },
   get edges() { return edges; },
+  get groups() { return groups; },
   get selectedNodeIds() { return selectedNodeIds; },
   set selectedNodeIds(value: Set<string>) { selectedNodeIds = value; },
   get selectedEdgeIds() { return selectedEdgeIds; },
@@ -515,6 +657,11 @@ export const graphStore = {
   addNode,
   updateNode,
   deleteNode,
+  addGroup,
+  updateGroup,
+  setGroupMembers,
+  deleteGroup,
+  recordGroupChange,
   addEdge,
   deleteEdge,
   selectNode,

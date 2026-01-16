@@ -42,8 +42,9 @@
         <div class="form-elements">
           <!-- Text Input -->
           <div class="form-group">
-            <label class="form-label">Text Input</label>
+            <label class="form-label" for="demo-text-input">Text Input</label>
             <input
+              id="demo-text-input"
               type="text"
               class="form-input"
               bind:value={textValue}
@@ -53,8 +54,9 @@
           
           <!-- Number Input -->
           <div class="form-group">
-            <label class="form-label">Number Input</label>
+            <label class="form-label" for="demo-number-input">Number Input</label>
             <input
+              id="demo-number-input"
               type="number"
               class="form-input"
               bind:value={numberValue}
@@ -65,8 +67,9 @@
           
           <!-- Textarea -->
           <div class="form-group">
-            <label class="form-label">Textarea</label>
+            <label class="form-label" for="demo-textarea">Textarea</label>
             <textarea
+              id="demo-textarea"
               class="form-textarea"
               bind:value={textareaValue}
               placeholder="Enter prompt..."
@@ -75,8 +78,8 @@
           
           <!-- Select / Dropdown -->
           <div class="form-group">
-            <label class="form-label">Select / Dropdown</label>
-            <select class="form-select" bind:value={selectValue}>
+            <label class="form-label" for="demo-select">Select / Dropdown</label>
+            <select id="demo-select" class="form-select" bind:value={selectValue}>
               <option value="euler">Euler</option>
               <option value="euler_a">Euler Ancestral</option>
               <option value="lcm">LCM</option>
@@ -87,9 +90,10 @@
           
           <!-- Slider -->
           <div class="form-group">
-            <label class="form-label">Slider (Denoise)</label>
+            <label class="form-label" for="demo-slider-denoise">Slider (Denoise)</label>
             <div class="slider-container">
               <input
+                id="demo-slider-denoise"
                 type="range"
                 class="form-slider"
                 min={0}
@@ -103,9 +107,10 @@
           
           <!-- Slider with larger range -->
           <div class="form-group">
-            <label class="form-label">Slider (Steps)</label>
+            <label class="form-label" for="demo-slider-steps">Slider (Steps)</label>
             <div class="slider-container">
               <input
+                id="demo-slider-steps"
                 type="range"
                 class="form-slider"
                 min={1}
@@ -119,9 +124,10 @@
           
           <!-- Toggle Switch -->
           <div class="form-group">
-            <label class="form-label">Toggle Switch</label>
+            <label class="form-label" for="demo-toggle">Toggle Switch</label>
             <label class="form-toggle">
               <input
+                id="demo-toggle"
                 type="checkbox"
                 bind:checked={toggleValue}
               />

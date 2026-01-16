@@ -5,7 +5,7 @@
   import { CanvasRenderer } from '../canvas/renderer';
   import { Canvas2DRenderer } from '../canvas/renderer-2d';
   import { getNodesInRect, getEdgesInRect } from '../canvas/interaction';
-  import { graphStore, getNodesVersion } from '../graph/store.svelte';
+  import { graphStore, getNodesVersion, getGroupsVersion } from '../graph/store.svelte';
   import { executionEngine } from '../orchestration/execution';
   import { theme } from './theme.svelte';
   import { sidebarState, ICON_SIDEBAR_WIDTH } from './sidebarState.svelte';
@@ -23,6 +23,7 @@
   import { getDOMNodeRadius, getDOMBorderWidth, MIN_ZOOM, MAX_ZOOM } from '../canvas/node-style';
   import MeshViewer from './MeshViewer.svelte';
   import CanvasMenu from './CanvasMenu.svelte';
+  import GroupMenu from './GroupMenu.svelte';
   
   // Renderer interface
   interface IRenderer {
@@ -76,10 +77,31 @@
   let marqueeCurrentWorld = $state<{ x: number; y: number } | null>(null);
   let marqueeCurrentScreen = $state<{ x: number; y: number } | null>(null);
   let initialSelection = new Set<string>();
+  let lastMarqueeBoundsWorld = $state<{ minX: number; minY: number; maxX: number; maxY: number } | null>(null);
   
   // Drag state - stores initial positions
   let dragStartWorld = { x: 0, y: 0 };
   let dragNodeStartPositions = new Map<string, { x: number; y: number }>();
+  
+  // Grouping state
+  type GroupMenuAnchor = { type: 'selection' } | { type: 'group'; groupId: string };
+  let groupMenuOpen = $state(false);
+  let groupMenuAnchor = $state<GroupMenuAnchor | null>(null);
+  let groupMenuPosition = $state({ x: 0, y: 0 });
+  let hoveredGroupId = $state<string | null>(null);
+  let groupMenuHovered = $state(false);
+  let selectedGroupId = $state<string | null>(null);
+  let groupDragId = $state<string | null>(null);
+  let groupDragStartWorld = { x: 0, y: 0 };
+  let groupDragStartScreen = { x: 0, y: 0 };
+  let groupDragMoved = $state(false);
+  let groupDragStartBounds: { x: number; y: number; width: number; height: number } | null = null;
+  let groupMemberStartPositions = new Map<string, { x: number; y: number }>();
+  let groupResizeId = $state<string | null>(null);
+  let groupResizeStartWorld = { x: 0, y: 0 };
+  let groupResizeStartBounds: { x: number; y: number; width: number; height: number } | null = null;
+  let groupHoverResizeId = $state<string | null>(null);
+  let groupHoveringResize = $state(false);
   
   // Multi-touch
   let activePointers = new Map<number, { x: number; y: number }>();
@@ -115,6 +137,9 @@
   
   // Default node size for image resizing
   const NODE_SIZE = 200;
+  const GROUP_MIN_SIZE = 160;
+  const GROUP_DRAG_THRESHOLD = 4;
+  const GROUP_TITLE_HEIGHT = 24;
   
   // Click-to-add offset counter - tracks where to place next clicked item
   let clickAddOffset = $state(0);
@@ -557,12 +582,19 @@
       if (sidebarState.isOpen) {
         sidebarState.isOpen = false;
       } else {
-      graphStore.deselectAll();
+        graphStore.deselectAll();
+        selectedGroupId = null;
+        groupMenuOpen = false;
+        groupMenuAnchor = null;
       }
       isDragging = false;
       isOverConnectorIcon = null;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && !isInInput) {
+      if (selectedGroupId) {
+        graphStore.deleteGroup(selectedGroupId);
+        selectedGroupId = null;
+      }
       // Delete selected nodes
       if (graphStore.selectedNodeIds.size > 0) {
         graphStore.selectedNodeIds.forEach(id => graphStore.deleteNode(id));
@@ -590,6 +622,13 @@
       handleMenuClose();
       return;
     }
+    
+    if (groupMenuOpen && groupMenuAnchor?.type === 'selection') {
+      groupMenuOpen = false;
+      groupMenuAnchor = null;
+    }
+    selectedGroupId = null;
+    lastMarqueeBoundsWorld = null;
     
     const rect = canvasElement.getBoundingClientRect();
     const screenX = e.clientX - rect.left;
@@ -747,6 +786,163 @@
       }
     }
   }
+
+  function handleGroupSelect(groupId: string) {
+    const group = graphStore.groups.get(groupId);
+    if (!group) return;
+    selectedGroupId = groupId;
+    graphStore.deselectAll();
+  }
+
+
+  function handleGroupPointerDown(e: PointerEvent, groupId: string) {
+    const rect = canvasElement.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    const hitNodeId = hitTestNode(screenX, screenY, false);
+    if (hitNodeId) {
+      return;
+    }
+    
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const group = graphStore.groups.get(groupId);
+    if (!group) return;
+    
+    handleGroupSelect(groupId);
+    
+    groupDragStartScreen = { x: screenX, y: screenY };
+    groupDragStartWorld = screenToWorld(screenX, screenY);
+    groupDragStartBounds = { x: group.x, y: group.y, width: group.width, height: group.height };
+    groupDragId = groupId;
+    groupDragMoved = false;
+    
+    groupMemberStartPositions.clear();
+    group.memberIds.forEach(id => {
+      const node = graphStore.getNodeById(id);
+      if (node) {
+        groupMemberStartPositions.set(id, { x: node.x, y: node.y });
+      }
+    });
+    
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    containerElement.setPointerCapture(e.pointerId);
+  }
+
+  function handleGroupResizeStart(e: PointerEvent, groupId: string) {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    const group = graphStore.groups.get(groupId);
+    if (!group) return;
+    handleGroupSelect(groupId);
+    
+    const rect = canvasElement.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    groupResizeStartWorld = screenToWorld(screenX, screenY);
+    groupResizeStartBounds = { x: group.x, y: group.y, width: group.width, height: group.height };
+    groupResizeId = groupId;
+    
+    activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    containerElement.setPointerCapture(e.pointerId);
+  }
+
+  function handleGroupPointerMove(e: PointerEvent, groupId: string) {
+    const target = e.currentTarget as HTMLDivElement;
+    const rect = target.getBoundingClientRect();
+    const edgeThreshold = 6;
+    const offsetX = e.clientX - rect.left;
+    const offsetY = e.clientY - rect.top;
+    const nearEdge =
+      offsetX <= edgeThreshold ||
+      offsetY <= edgeThreshold ||
+      rect.width - offsetX <= edgeThreshold ||
+      rect.height - offsetY <= edgeThreshold;
+    
+    groupHoverResizeId = groupId;
+    groupHoveringResize = nearEdge;
+    canvasElement.style.cursor = nearEdge ? 'nwse-resize' : 'grab';
+  }
+
+  function handleGroupPointerLeave(groupId: string) {
+    if (groupHoverResizeId === groupId) {
+      groupHoverResizeId = null;
+      groupHoveringResize = false;
+      canvasElement.style.cursor = '';
+    }
+  }
+
+  function handleCreateGroup() {
+    const selectedImageIds = getSelectedImageIds();
+    if (selectedImageIds.length < 2) {
+      groupMenuOpen = false;
+      groupMenuAnchor = null;
+      return;
+    }
+    
+    const groupMembers = lastMarqueeBoundsWorld
+      ? getImageNodesInBounds(lastMarqueeBoundsWorld)
+      : selectedImageIds;
+    
+    if (groupMembers.length < 2) {
+      groupMenuOpen = false;
+      groupMenuAnchor = null;
+      return;
+    }
+    
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    
+    groupMembers.forEach(id => {
+      const node = graphStore.getNodeById(id);
+      if (!node) return;
+      minX = Math.min(minX, node.x);
+      minY = Math.min(minY, node.y);
+      maxX = Math.max(maxX, node.x + node.width);
+      maxY = Math.max(maxY, node.y + node.height);
+    });
+    
+    if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+      return;
+    }
+    
+    const padding = 16;
+    const name = `Group ${graphStore.groups.size + 1}`;
+    const groupId = graphStore.addGroup(
+      minX - padding,
+      minY - padding,
+      maxX - minX + padding * 2,
+      maxY - minY + padding * 2,
+      groupMembers,
+      name
+    );
+    
+    selectedGroupId = groupId;
+    graphStore.deselectAll();
+    groupMenuAnchor = null;
+    groupMenuOpen = false;
+    lastMarqueeBoundsWorld = null;
+  }
+
+  function handleUngroup() {
+    if (!selectedGroupId) return;
+    graphStore.deleteGroup(selectedGroupId);
+    selectedGroupId = null;
+    groupMenuOpen = false;
+    groupMenuAnchor = null;
+    hoveredGroupId = null;
+  }
+
+  function handleGroupMenuClose() {
+    groupMenuOpen = false;
+    if (groupMenuAnchor?.type === 'selection') {
+      groupMenuAnchor = null;
+    }
+  }
   
   function handlePointerMove(e: PointerEvent) {
     if (!activePointers.has(e.pointerId)) return;
@@ -774,6 +970,44 @@
     const viewWidth = rect.width;
     const viewHeight = rect.height;
     const world = screenToWorld(screenX, screenY, viewWidth, viewHeight);
+
+    if (groupResizeId && groupResizeStartBounds) {
+      const deltaX = world.x - groupResizeStartWorld.x;
+      const deltaY = world.y - groupResizeStartWorld.y;
+      const nextWidth = Math.max(GROUP_MIN_SIZE, groupResizeStartBounds.width + deltaX);
+      const nextHeight = Math.max(GROUP_MIN_SIZE, groupResizeStartBounds.height + deltaY);
+      graphStore.updateGroup(groupResizeId, {
+        width: nextWidth,
+        height: nextHeight,
+      });
+      return;
+    }
+    
+    if (groupDragId && groupDragStartBounds) {
+      const distance = Math.hypot(
+        screenX - groupDragStartScreen.x,
+        screenY - groupDragStartScreen.y
+      );
+      if (!groupDragMoved && distance < GROUP_DRAG_THRESHOLD) {
+        return;
+      }
+      groupDragMoved = true;
+      const deltaX = world.x - groupDragStartWorld.x;
+      const deltaY = world.y - groupDragStartWorld.y;
+      
+      graphStore.updateGroup(groupDragId, {
+        x: groupDragStartBounds.x + deltaX,
+        y: groupDragStartBounds.y + deltaY,
+      });
+      
+      groupMemberStartPositions.forEach((startPos, nodeId) => {
+        graphStore.updateNode(nodeId, {
+          x: startPos.x + deltaX,
+          y: startPos.y + deltaY,
+        });
+      });
+      return;
+    }
     
     // Connection dragging
     if (isConnecting && connectionStart) {
@@ -801,6 +1035,10 @@
       }
       
       return;
+    }
+
+    if (!isDragging && !isConnecting && !groupDragId && !groupResizeId) {
+      hoveredGroupId = getHoveredGroupId(screenX, screenY);
     }
     
     // Edge reconnection dragging
@@ -939,6 +1177,42 @@
   function handlePointerUp(e: PointerEvent) {
     activePointers.delete(e.pointerId);
     containerElement.releasePointerCapture(e.pointerId);
+
+    if (groupResizeId) {
+      if (groupResizeStartBounds) {
+        const group = graphStore.groups.get(groupResizeId);
+        if (group) {
+          graphStore.recordGroupChange(
+            groupResizeId,
+            { ...group, ...groupResizeStartBounds },
+            group
+          );
+        }
+      }
+      groupResizeId = null;
+      groupResizeStartBounds = null;
+      canvasElement.style.cursor = '';
+      return;
+    }
+    
+    if (groupDragId) {
+      if (groupDragMoved && groupDragStartBounds) {
+        const group = graphStore.groups.get(groupDragId);
+        if (group) {
+          graphStore.recordGroupChange(
+            groupDragId,
+            { ...group, ...groupDragStartBounds },
+            group
+          );
+        }
+      }
+      groupDragId = null;
+      groupDragStartBounds = null;
+      groupMemberStartPositions.clear();
+      groupDragMoved = false;
+      canvasElement.style.cursor = '';
+      return;
+    }
     
     // Handle connector icon click (didn't drag far enough to start connection)
     if (connectorDragStart && !isConnecting) {
@@ -1034,6 +1308,26 @@
     
     // Finalize marquee selection
     if (mode === 'marquee') {
+      if (marqueeStartWorld && marqueeCurrentWorld) {
+        lastMarqueeBoundsWorld = {
+          minX: Math.min(marqueeStartWorld.x, marqueeCurrentWorld.x),
+          minY: Math.min(marqueeStartWorld.y, marqueeCurrentWorld.y),
+          maxX: Math.max(marqueeStartWorld.x, marqueeCurrentWorld.x),
+          maxY: Math.max(marqueeStartWorld.y, marqueeCurrentWorld.y),
+        };
+      }
+      
+      const selectedImageIds = getSelectedImageIds();
+      if (selectedImageIds.length >= 2) {
+        groupMenuOpen = true;
+        groupMenuAnchor = { type: 'selection' };
+        selectedGroupId = null;
+      } else {
+        groupMenuOpen = false;
+        groupMenuAnchor = null;
+        lastMarqueeBoundsWorld = null;
+      }
+      
       mode = 'select';
       marqueeStartWorld = null;
       marqueeStartScreen = null;
@@ -1059,6 +1353,7 @@
       // Record move action for undo before clearing positions
       if (isDragging && dragNodeStartPositions.size > 0) {
         const moves: Array<{ id: string; fromX: number; fromY: number; toX: number; toY: number }> = [];
+        const movedIds: string[] = [];
         dragNodeStartPositions.forEach((startPos, id) => {
           const node = graphStore.getNodeById(id);
           if (node) {
@@ -1069,9 +1364,11 @@
               toX: node.x,
               toY: node.y,
             });
+            movedIds.push(id);
           }
         });
         graphStore.recordMove(moves);
+        addDraggedNodesToGroups(movedIds);
       }
       
       mode = 'select';
@@ -1090,6 +1387,12 @@
   function handlePointerCancel(e: PointerEvent) {
     activePointers.delete(e.pointerId);
     if (activePointers.size === 0) {
+      groupDragId = null;
+      groupResizeId = null;
+      groupDragStartBounds = null;
+      groupResizeStartBounds = null;
+      groupMemberStartPositions.clear();
+      groupDragMoved = false;
       mode = 'select';
       isPanning = false;
       isDragging = false;
@@ -1114,7 +1417,7 @@
     e.preventDefault();
     
     // Block zoom/pan when menu is open
-    if (menuOpen) return;
+    if (menuOpen || groupMenuOpen) return;
     
     // Use the same rect for mouse position and dimensions
     const rect = canvasElement.getBoundingClientRect();
@@ -1813,6 +2116,107 @@
       borderWidth: getDOMBorderWidth(graphStore.camera.zoom, true, false),
     };
   });
+
+  function getSelectedImageIds(): string[] {
+    const ids: string[] = [];
+    graphStore.selectedNodeIds.forEach(id => {
+      const node = graphStore.getNodeById(id);
+      if (node?.type === 'image') ids.push(id);
+    });
+    return ids;
+  }
+
+  function getImageNodesFullyInBounds(bounds: { minX: number; minY: number; maxX: number; maxY: number }): string[] {
+    const ids: string[] = [];
+    for (const [id, node] of graphStore.nodes) {
+      if (node.type !== 'image') continue;
+      const fullyInside =
+        node.x >= bounds.minX &&
+        node.y >= bounds.minY &&
+        node.x + node.width <= bounds.maxX &&
+        node.y + node.height <= bounds.maxY;
+      if (fullyInside) ids.push(id);
+    }
+    return ids;
+  }
+
+  function getImageNodesInBounds(bounds: { minX: number; minY: number; maxX: number; maxY: number }): string[] {
+    const ids = getNodesInRect(bounds.minX, bounds.minY, bounds.maxX, bounds.maxY, graphStore.nodes);
+    return ids.filter(id => graphStore.getNodeById(id)?.type === 'image');
+  }
+
+  function getHoveredGroupId(screenX: number, screenY: number): string | null {
+    for (const group of groupSections) {
+      const inX = screenX >= group.screenX && screenX <= group.screenX + group.screenWidth;
+      const inY = screenY >= group.screenY && screenY <= group.screenY + group.screenHeight;
+      const inHeader =
+        screenX >= group.screenX &&
+        screenX <= group.screenX + group.screenWidth &&
+        screenY >= group.screenY - GROUP_TITLE_HEIGHT &&
+        screenY <= group.screenY;
+      if ((inX && inY) || inHeader) {
+        return group.id;
+      }
+    }
+    return null;
+  }
+
+  function addDraggedNodesToGroups(movedNodeIds: string[]) {
+    if (movedNodeIds.length === 0) return;
+    graphStore.groups.forEach(group => {
+      const groupBounds = {
+        minX: group.x,
+        minY: group.y,
+        maxX: group.x + group.width,
+        maxY: group.y + group.height,
+      };
+      const inGroup = getImageNodesInBounds(groupBounds);
+      const updatedMembers = Array.from(new Set([...group.memberIds, ...inGroup]));
+      if (updatedMembers.length !== group.memberIds.length) {
+        graphStore.recordGroupChange(group.id, group, { ...group, memberIds: updatedMembers });
+        graphStore.setGroupMembers(group.id, updatedMembers);
+      }
+    });
+  }
+
+  let groupSelectionBounds = $derived.by(() => {
+    if (!renderer) return null;
+    const version = getNodesVersion();
+    void version;
+    // Track viewport for reactivity (needed because renderer.resize() doesn't change reference)
+    void canvasWidth; void canvasHeight;
+    const selectedImageIds = getSelectedImageIds();
+    if (selectedImageIds.length < 2) return null;
+    
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    
+    selectedImageIds.forEach(id => {
+      const node = graphStore.getNodeById(id);
+      if (!node) return;
+      minX = Math.min(minX, node.x);
+      minY = Math.min(minY, node.y);
+      maxX = Math.max(maxX, node.x + node.width);
+      maxY = Math.max(maxY, node.y + node.height);
+    });
+    
+    if (!isFinite(minX) || !isFinite(minY) || !isFinite(maxX) || !isFinite(maxY)) {
+      return null;
+    }
+    
+    const topLeft = renderer.worldToScreen(minX, minY, graphStore.camera);
+    const bottomRight = renderer.worldToScreen(maxX, maxY, graphStore.camera);
+    return {
+      x: topLeft.x,
+      y: topLeft.y,
+      width: bottomRight.x - topLeft.x,
+      height: bottomRight.y - topLeft.y,
+      borderRadius: getDOMNodeRadius(graphStore.camera.zoom),
+      borderWidth: getDOMBorderWidth(graphStore.camera.zoom, true, false),
+    };
+  });
   
   // Screen-space bounds for hovered node (only if not already selected)
   let hoverBounds = $derived.by(() => {
@@ -1839,6 +2243,18 @@
       height: bottomRight.y - topLeft.y,
     };
   });
+  
+  // Group sections rendered as DOM overlays
+  let groupSections = $state<Array<{
+    id: string;
+    name: string;
+    screenX: number;
+    screenY: number;
+    screenWidth: number;
+    screenHeight: number;
+    borderRadius: number;
+    isSelected: boolean;
+  }>>([]);
   
   // Image nodes rendered as DOM overlays (works with both WebGPU and Canvas2D)
   // Use $state and $effect for explicit reactivity control
@@ -1944,6 +2360,73 @@
   
   // Port overlays computed separately to avoid performance issues
   // Only show ports for hovered/selected nodes or when connecting
+  
+  // Update group sections when groups or camera changes
+  $effect(() => {
+    const version = getGroupsVersion();
+    const cam = graphStore.camera;
+    const selectedGroup = selectedGroupId;
+    void version;
+    // Track viewport for reactivity (needed because renderer.resize() doesn't change reference)
+    void canvasWidth; void canvasHeight;
+    
+    if (!renderer) {
+      groupSections = [];
+      return;
+    }
+    
+    groupSections = Array.from(graphStore.groups.values()).map(group => {
+      const topLeft = renderer.worldToScreen(group.x, group.y, cam);
+      const bottomRight = renderer.worldToScreen(
+        group.x + group.width,
+        group.y + group.height,
+        cam
+      );
+      return {
+        id: group.id,
+        name: group.name,
+        screenX: topLeft.x,
+        screenY: topLeft.y,
+        screenWidth: bottomRight.x - topLeft.x,
+        screenHeight: bottomRight.y - topLeft.y,
+        borderRadius: getDOMNodeRadius(cam.zoom),
+        isSelected: selectedGroup === group.id,
+      };
+    });
+  });
+
+  let activeGroupAnchor = $derived.by(() => {
+    if (groupMenuAnchor?.type === 'selection') return groupMenuAnchor;
+    if (hoveredGroupId) return { type: 'group', groupId: hoveredGroupId } as const;
+    if (selectedGroupId) return { type: 'group', groupId: selectedGroupId } as const;
+    return null;
+  });
+  
+  let groupMenuVisible = $derived.by(() => {
+    if (activeGroupAnchor?.type === 'selection') return groupMenuOpen;
+    return Boolean(activeGroupAnchor) || groupMenuHovered;
+  });
+  
+  $effect(() => {
+    if (!activeGroupAnchor) return;
+    
+    if (activeGroupAnchor.type === 'selection') {
+      if (!groupSelectionBounds) return;
+      groupMenuPosition = {
+        x: groupSelectionBounds.x + groupSelectionBounds.width + 12,
+        y: groupSelectionBounds.y + groupSelectionBounds.height / 2 - 24,
+      };
+      return;
+    }
+    
+    const group = groupSections.find(section => section.id === activeGroupAnchor.groupId);
+    if (!group) return;
+    const offset = group.isSelected ? 12 : 48;
+    groupMenuPosition = {
+      x: group.screenX + group.screenWidth + offset,
+      y: group.screenY + group.screenHeight / 2 - 24,
+    };
+  });
   
   // Update imageNodes and modelNodes when nodes or camera changes
   $effect(() => {
@@ -2371,6 +2854,8 @@
   class="canvas-container" 
   class:drag-over={isDragOver}
   bind:this={containerElement}
+  role="application"
+  aria-label="Canvas"
   ondragover={handleDragOver}
   ondragleave={handleDragLeave}
   ondrop={handleDrop}
@@ -2391,6 +2876,40 @@
     tabindex="0"
   ></canvas>
   
+  {#if groupSelectionBounds}
+    <div
+      class="group-selection-bounds"
+      style={`left: ${groupSelectionBounds.x}px; top: ${groupSelectionBounds.y}px; width: ${groupSelectionBounds.width}px; height: ${groupSelectionBounds.height}px; border-radius: ${groupSelectionBounds.borderRadius}px; border-width: ${groupSelectionBounds.borderWidth}px;`}
+    ></div>
+  {/if}
+  
+  {#each groupSections as group (group.id)}
+    <div
+      class="group-section"
+      class:selected={group.isSelected}
+      class:hover-resize={groupHoveringResize && groupHoverResizeId === group.id}
+      style={`left: ${group.screenX}px; top: ${group.screenY}px; width: ${group.screenWidth}px; height: ${group.screenHeight}px; border-radius: ${group.borderRadius}px;`}
+      onpointerdown={(e) => handleGroupPointerDown(e, group.id)}
+      onpointermove={(e) => handleGroupPointerMove(e, group.id)}
+      onpointerleave={() => handleGroupPointerLeave(group.id)}
+      role="presentation"
+    >
+      <button
+        class="group-title"
+        type="button"
+        onpointerdown={(e) => { e.stopPropagation(); handleGroupPointerDown(e, group.id); }}
+        onclick={(e) => { e.stopPropagation(); handleGroupSelect(group.id); }}
+      >
+        {group.name}
+      </button>
+      <div
+        class="group-resize-handle"
+        onpointerdown={(e) => handleGroupResizeStart(e, group.id)}
+        role="presentation"
+      ></div>
+    </div>
+  {/each}
+  
   <!-- Image nodes rendered as DOM overlays -->
   {#each imageNodes as img (img.id)}
     <div
@@ -2410,7 +2929,7 @@
         {#if img.imageUrl}
           <img 
             src={img.imageUrl} 
-            alt="Dropped image"
+            alt={img.filename || 'Dropped'}
             draggable="false"
           />
           <!-- Hover overlay -->
@@ -2433,7 +2952,8 @@
       </div>
       <!-- Connector icon - positioned outside overlay to avoid overflow:hidden clipping -->
       {#if img.imageUrl}
-        <div 
+        <button 
+          type="button"
           class="node-connector-icon" 
           class:visible={img.isHovered}
           class:dragging={isConnecting && connectionStart?.nodeId === img.id}
@@ -2442,14 +2962,13 @@
           onclick={(e) => handleConnectorClick(e, img.id, 'image')}
           onmouseenter={() => handleConnectorMouseEnter(img.id)}
           onmouseleave={handleConnectorMouseLeave}
-          role="button"
-          tabindex="-1"
+          aria-label="Open connector menu"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <circle cx="12" cy="12" r="9" />
             <path d="M12 8v8M8 12h8" />
           </svg>
-        </div>
+        </button>
       {/if}
       <!-- Error tooltip for image node -->
       {#if img.status === 'error' && img.error && img.isHovered}
@@ -2576,7 +3095,8 @@
       </div>
       <!-- Connector icon - positioned outside overlay to avoid overflow:hidden clipping -->
       {#if output.imageUrl}
-        <div 
+        <button 
+          type="button"
           class="node-connector-icon" 
           class:visible={output.isHovered}
           class:dragging={isConnecting && connectionStart?.nodeId === output.id}
@@ -2585,14 +3105,13 @@
           onclick={(e) => handleConnectorClick(e, output.id, 'image')}
           onmouseenter={() => handleConnectorMouseEnter(output.id)}
           onmouseleave={handleConnectorMouseLeave}
-          role="button"
-          tabindex="-1"
+          aria-label="Open connector menu"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <circle cx="12" cy="12" r="9" />
             <path d="M12 8v8M8 12h8" />
           </svg>
-        </div>
+        </button>
       {/if}
       <!-- Error tooltip for output node -->
       {#if output.status === 'error' && output.error && output.isHovered}
@@ -2695,7 +3214,8 @@
       </div>
       <!-- Connector icon - positioned outside overlay to avoid overflow:hidden clipping -->
       {#if meshNode.meshUrl || meshNode.videoUrl || meshNode.thumbnailUrl || meshNode.previewUrl}
-        <div 
+        <button 
+          type="button"
           class="node-connector-icon" 
           class:visible={meshNode.isHovered}
           class:dragging={isConnecting && connectionStart?.nodeId === meshNode.id}
@@ -2704,14 +3224,13 @@
           onclick={(e) => handleConnectorClick(e, meshNode.id, 'mesh')}
           onmouseenter={() => handleConnectorMouseEnter(meshNode.id)}
           onmouseleave={handleConnectorMouseLeave}
-          role="button"
-          tabindex="-1"
+          aria-label="Open connector menu"
         >
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
             <circle cx="12" cy="12" r="9" />
             <path d="M12 8v8M8 12h8" />
           </svg>
-        </div>
+        </button>
       {/if}
       <!-- Error tooltip for mesh node -->
       {#if meshNode.status === 'error' && meshNode.error && meshNode.isHovered}
@@ -2807,6 +3326,20 @@
       sourcePortType={menuSourcePortType}
       onselect={handleMenuSelect}
       onclose={handleMenuClose}
+    />
+  {/if}
+  
+  {#if activeGroupAnchor}
+    <GroupMenu
+      x={groupMenuPosition.x}
+      y={groupMenuPosition.y}
+      visible={groupMenuVisible}
+      showGroup={activeGroupAnchor.type === 'selection'}
+      showUngroup={activeGroupAnchor.type === 'group'}
+      onGroup={handleCreateGroup}
+      onUngroup={handleUngroup}
+      onclose={handleGroupMenuClose}
+      onHoverChange={(hovered) => groupMenuHovered = hovered}
     />
   {/if}
 </div>
@@ -3061,6 +3594,9 @@
     display: flex;
     align-items: center;
     justify-content: center;
+    border: none;
+    background: none;
+    padding: 0;
     pointer-events: none;
     z-index: 100;
     opacity: 0;
@@ -3277,15 +3813,6 @@
     width: 24px;
     height: 24px;
     color: white;
-  }
-  
-  .model-status-indicator .spinner {
-    width: 24px;
-    height: 24px;
-    border: 3px solid rgba(255, 255, 255, 0.3);
-    border-top-color: white;
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
   }
   
   /* Volt loader - custom loading spinner */
@@ -3601,6 +4128,15 @@
     pointer-events: none;
     border-radius: 4px;
   }
+
+  .group-selection-bounds {
+    position: absolute;
+    border-style: solid;
+    border-color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.03);
+    pointer-events: none;
+    z-index: 12;
+  }
   
   /* Hover bounds - hidden for new design (handled by node overlay) */
   .hover-bounds {
@@ -3610,6 +4146,61 @@
   /* Selection bounds - only show for multi-node selection */
   .selection-bounds {
     display: none;
+  }
+
+  .group-section {
+    position: absolute;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    z-index: 12;
+    pointer-events: auto;
+  }
+  
+  .group-section.selected {
+    border-color: rgba(255, 255, 255, 0.6);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  }
+  
+  .group-section:hover {
+    cursor: grab;
+  }
+  
+  .group-section.hover-resize {
+    cursor: nwse-resize;
+  }
+  
+  .group-title {
+    position: absolute;
+    top: -20px;
+    left: 8px;
+    padding: 2px 8px;
+    background: #1a1a1e;
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 10px;
+    font-size: 11px;
+    color: rgba(244, 244, 244, 0.9);
+    pointer-events: auto;
+    cursor: grab;
+    font-family: 'Helvetica Now Display', 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    text-align: left;
+    appearance: none;
+  }
+
+  .group-title:active {
+    cursor: grabbing;
+  }
+  
+  .group-resize-handle {
+    position: absolute;
+    right: 6px;
+    bottom: 6px;
+    width: 12px;
+    height: 12px;
+    border-radius: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.2);
+    cursor: se-resize;
+    pointer-events: auto;
   }
   
   .selection-handle {
