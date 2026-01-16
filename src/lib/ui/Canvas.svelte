@@ -139,7 +139,7 @@
   const NODE_SIZE = 200;
   const GROUP_MIN_SIZE = 160;
   const GROUP_DRAG_THRESHOLD = 4;
-  const GROUP_TITLE_HEIGHT = 24;
+  const GROUP_TITLE_HEIGHT = 32;
   
   // Click-to-add offset counter - tracks where to place next clicked item
   let clickAddOffset = $state(0);
@@ -623,14 +623,28 @@
       return;
     }
     
+    const rect = canvasElement.getBoundingClientRect();
+    const screenX = e.clientX - rect.left;
+    const screenY = e.clientY - rect.top;
+    
+    // Check if click is inside any group bounds
+    const groupsAtClick: string[] = [];
+    for (const gs of groupSections) {
+      if (screenX >= gs.screenX && screenX <= gs.screenX + gs.screenWidth && screenY >= gs.screenY && screenY <= gs.screenY + gs.screenHeight) {
+        groupsAtClick.push(gs.id);
+      }
+    }
+    
     if (groupMenuOpen && groupMenuAnchor?.type === 'selection') {
       groupMenuOpen = false;
       groupMenuAnchor = null;
     }
-    selectedGroupId = null;
+    // Only clear selectedGroupId if clicking outside the group
+    if (groupsAtClick.length === 0) {
+      selectedGroupId = null;
+      groupMenuAnchor = null;
+    }
     lastMarqueeBoundsWorld = null;
-    
-    const rect = canvasElement.getBoundingClientRect();
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
     // Use the same rect dimensions for coordinate conversions to ensure consistency
@@ -1318,7 +1332,24 @@
       }
       
       const selectedImageIds = getSelectedImageIds();
-      if (selectedImageIds.length >= 2) {
+      
+      // Check which groups the marquee overlaps
+      const groupsInMarquee: string[] = [];
+      if (lastMarqueeBoundsWorld) {
+        graphStore.groups.forEach(g => {
+          const overlaps = !(g.x + g.width < lastMarqueeBoundsWorld!.minX || g.x > lastMarqueeBoundsWorld!.maxX || g.y + g.height < lastMarqueeBoundsWorld!.minY || g.y > lastMarqueeBoundsWorld!.maxY);
+          if (overlaps) groupsInMarquee.push(g.id);
+        });
+      }
+      
+      // If marquee overlaps a group and no image nodes are selected, select the group
+      if (selectedImageIds.length === 0 && groupsInMarquee.length > 0) {
+        // Select the first overlapping group
+        selectedGroupId = groupsInMarquee[0];
+        groupMenuOpen = true;
+        groupMenuAnchor = { type: 'group', groupId: groupsInMarquee[0] };
+        lastMarqueeBoundsWorld = null;
+      } else if (selectedImageIds.length >= 2) {
         groupMenuOpen = true;
         groupMenuAnchor = { type: 'selection' };
         selectedGroupId = null;
@@ -2171,8 +2202,12 @@
         maxY: group.y + group.height,
       };
       const inGroup = getImageNodesInBounds(groupBounds);
-      const updatedMembers = Array.from(new Set([...group.memberIds, ...inGroup]));
-      if (updatedMembers.length !== group.memberIds.length) {
+      // Filter out moved nodes that are no longer inside the group bounds
+      const movedSet = new Set(movedNodeIds);
+      const remainingMembers = group.memberIds.filter(id => !movedSet.has(id) || inGroup.includes(id));
+      // Add any new nodes that were dragged into the group
+      const updatedMembers = Array.from(new Set([...remainingMembers, ...inGroup]));
+      if (updatedMembers.length !== group.memberIds.length || updatedMembers.some((id, i) => id !== group.memberIds[i])) {
         graphStore.recordGroupChange(group.id, group, { ...group, memberIds: updatedMembers });
         graphStore.setGroupMembers(group.id, updatedMembers);
       }
@@ -2404,7 +2439,11 @@
   
   let groupMenuVisible = $derived.by(() => {
     if (activeGroupAnchor?.type === 'selection') return groupMenuOpen;
-    return Boolean(activeGroupAnchor) || groupMenuHovered;
+    // For group type, only show if explicitly opened OR hovering over the group/menu
+    if (activeGroupAnchor?.type === 'group') {
+      return groupMenuOpen || hoveredGroupId === activeGroupAnchor.groupId || groupMenuHovered;
+    }
+    return false;
   });
   
   $effect(() => {
@@ -4171,7 +4210,7 @@
   
   .group-title {
     position: absolute;
-    top: -20px;
+    top: -28px;
     left: 8px;
     padding: 2px 8px;
     background: #1a1a1e;
