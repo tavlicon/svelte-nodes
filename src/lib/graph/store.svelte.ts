@@ -607,6 +607,130 @@ function getState(): GraphState {
   };
 }
 
+// ============================================================================
+// TIDY CONFIGURATION
+// ============================================================================
+// Gap between nodes when tidying (in pixels)
+// Change this value to adjust the spacing between tidied nodes
+const TIDY_GAP = 20;
+
+// Padding inside group border (in pixels)
+const GROUP_PADDING = 24;
+// ============================================================================
+
+/**
+ * Horizontal 1D even-spacing algorithm for tidying image nodes in a group.
+ * 
+ * Algorithm:
+ * 1. Sort nodes left-to-right by X position
+ * 2. Anchor first node (left edge stays put)
+ * 3. Place each subsequent node with a fixed gap (TIDY_GAP)
+ * 4. Align all nodes to the top (minimum Y)
+ * 5. Resize group to fit tidied nodes
+ * 
+ * @param groupId - The group to tidy
+ */
+function tidyGroupNodes(groupId: string): void {
+  const group = groups.get(groupId);
+  if (!group) return;
+  
+  // Get image nodes that are members of this group
+  const imageNodes = group.memberIds
+    .map(id => nodes.get(id))
+    .filter((n): n is NodeInstance => n !== undefined && n.type === 'image');
+  
+  // Need at least 2 nodes to tidy
+  if (imageNodes.length < 2) return;
+  
+  // Sort nodes left-to-right by X position
+  const sorted = [...imageNodes].sort((a, b) => a.x - b.x);
+  
+  // Find the topmost Y position (minimum Y)
+  const topY = Math.min(...imageNodes.map(n => n.y));
+  
+  // Record original positions for undo
+  const moves: Array<{ id: string; fromX: number; fromY: number; toX: number; toY: number }> = [];
+  
+  // Anchor point: first node's left edge
+  let currentX = sorted[0].x;
+  
+  // Single Yjs transaction for all node updates
+  ydoc.transact(() => {
+    for (const node of sorted) {
+      const fromX = node.x;
+      const fromY = node.y;
+      
+      // New X position, align Y to top
+      const toX = Math.round(currentX);
+      const toY = topY;
+      
+      // Advance X for next node: current node's width + gap
+      currentX += node.width + TIDY_GAP;
+      
+      // Only update if position changed
+      if (toX !== fromX || toY !== fromY) {
+        const updated = { ...node, x: toX, y: toY };
+        yNodes.set(node.id, updated);
+        moves.push({ id: node.id, fromX, fromY, toX, toY });
+      }
+    }
+  });
+  
+  // Update local state for immediate reactivity
+  if (moves.length > 0) {
+    const newNodes = new Map(nodes);
+    for (const move of moves) {
+      const existing = newNodes.get(move.id);
+      if (existing) {
+        newNodes.set(move.id, { ...existing, x: move.toX, y: move.toY });
+      }
+    }
+    nodes = newNodes;
+    nodesVersion++;
+    
+    // Record move for undo (single action for entire operation)
+    pushAction({ type: 'move_nodes', moves });
+  }
+  
+  // Resize the group to fit the tidied nodes
+  const updatedImageNodes = group.memberIds
+    .map(id => nodes.get(id))
+    .filter((n): n is NodeInstance => n !== undefined && n.type === 'image');
+  
+  const newMinX = Math.min(...updatedImageNodes.map(n => n.x));
+  const newMaxX = Math.max(...updatedImageNodes.map(n => n.x + n.width));
+  const newMinY = Math.min(...updatedImageNodes.map(n => n.y));
+  const newMaxY = Math.max(...updatedImageNodes.map(n => n.y + n.height));
+  
+  // Update group bounds with padding
+  const newGroupX = newMinX - GROUP_PADDING;
+  const newGroupY = newMinY - GROUP_PADDING;
+  const newGroupWidth = (newMaxX - newMinX) + GROUP_PADDING * 2;
+  const newGroupHeight = (newMaxY - newMinY) + GROUP_PADDING * 2;
+  
+  // Store original group for undo
+  const originalGroup = { ...group };
+  
+  // Update group
+  const updatedGroup: GroupSection = {
+    ...group,
+    x: newGroupX,
+    y: newGroupY,
+    width: newGroupWidth,
+    height: newGroupHeight,
+  };
+  
+  groups = new Map(groups).set(groupId, updatedGroup);
+  groupsVersion++;
+  
+  ydoc.transact(() => {
+    yGroups.set(groupId, updatedGroup);
+  });
+  
+  // Record group change for undo
+  recordGroupChange(groupId, originalGroup, updatedGroup);
+}
+
 // Helper to get nodes with proper reactivity tracking
 function getNodesReactive(): Map<string, NodeInstance> {
   // Access version to create dependency
@@ -680,4 +804,7 @@ export const graphStore = {
   undo,
   redo,
   recordMove,
+  
+  // Tidy group nodes
+  tidyGroupNodes,
 };

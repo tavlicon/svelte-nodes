@@ -988,6 +988,11 @@
     hoveredGroupId = null;
   }
 
+  function handleTidyGroup() {
+    if (!selectedGroupId) return;
+    graphStore.tidyGroupNodes(selectedGroupId);
+  }
+
   function handleGroupMenuClose() {
     groupMenuOpen = false;
     if (groupMenuAnchor?.type === 'selection') {
@@ -3488,8 +3493,11 @@
       visible={groupMenuVisible}
       showGroup={activeGroupAnchor.type === 'selection'}
       showUngroup={activeGroupAnchor.type === 'group'}
+      showTidy={activeGroupAnchor.type === 'group'}
+      tidyDisabled={false}
       onGroup={handleCreateGroup}
       onUngroup={handleUngroup}
+      onTidy={handleTidyGroup}
       onclose={handleGroupMenuClose}
       onHoverChange={(hovered) => groupMenuHovered = hovered}
     />

@@ -5,13 +5,16 @@
     visible: boolean;
     showGroup: boolean;
     showUngroup: boolean;
+    showTidy: boolean;
+    tidyDisabled: boolean;
     onGroup: () => void;
     onUngroup: () => void;
+    onTidy: () => void;
     onclose: () => void;
     onHoverChange?: (hovered: boolean) => void;
   }
 
-  let { x, y, visible, showGroup, showUngroup, onGroup, onUngroup, onclose, onHoverChange }: Props = $props();
+  let { x, y, visible, showGroup, showUngroup, showTidy, tidyDisabled, onGroup, onUngroup, onTidy, onclose, onHoverChange }: Props = $props();
 
   function handleBackdropPointerDown(e: PointerEvent) {
     if (e.target === e.currentTarget) {
@@ -59,6 +62,22 @@
           </svg>
         </span>
         <span class="label">Ungroup</span>
+      </button>
+    {/if}
+    {#if showTidy}
+      <button class="group-menu-item" class:disabled={tidyDisabled} onclick={onTidy} disabled={tidyDisabled} type="button" role="menuitem">
+        <span class="icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <!-- Horizontal distribute icon: 3 vertical bars with equal spacing arrows -->
+            <rect x="4" y="6" width="3" height="12" rx="1" stroke="white" stroke-width="1.5"/>
+            <rect x="10.5" y="6" width="3" height="12" rx="1" stroke="white" stroke-width="1.5"/>
+            <rect x="17" y="6" width="3" height="12" rx="1" stroke="white" stroke-width="1.5"/>
+            <!-- Equal spacing indicators -->
+            <path d="M7.5 12H10" stroke="white" stroke-width="1" stroke-linecap="round"/>
+            <path d="M14 12H16.5" stroke="white" stroke-width="1" stroke-linecap="round"/>
+          </svg>
+        </span>
+        <span class="label">Tidy Up</span>
       </button>
     {/if}
   </div>
@@ -119,8 +138,13 @@
     gap: 10px;
   }
 
-  .group-menu-item:hover {
+  .group-menu-item:hover:not(:disabled) {
     background: rgba(255, 255, 255, 0.08);
+  }
+
+  .group-menu-item.disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
   }
 
   .icon {
