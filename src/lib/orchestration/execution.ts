@@ -549,6 +549,7 @@ class ExecutionEngine {
   
   /**
    * Create a new mesh output node for TripoSR generations
+   * Uses collision-aware placement to avoid overlapping with existing nodes
    */
   private createOrUpdateMeshOutputNode(
     modelNode: NodeInstance,
@@ -571,25 +572,18 @@ class ExecutionEngine {
     const modelNodeHeight = modelNode.height || 200;
     const BASE_OUTPUT_SIZE = 200;
     
-    // Position output to the RIGHT of the model node
-    const outputX = modelNode.x + modelNodeWidth + 40;
+    // Preferred position: to the RIGHT of the model node, vertically centered
+    const preferredX = modelNode.x + modelNodeWidth + 40;
     const modelCenterY = modelNode.y + (modelNodeHeight / 2);
+    const preferredY = modelCenterY - (BASE_OUTPUT_SIZE / 2);
     
-    // Find existing mesh-output nodes to the right of the model
-    const outputNodes = Array.from(graphStore.nodes.values())
-      .filter(node => node.type === 'mesh-output')
-      .filter(node => node.x >= modelNode.x + modelNodeWidth)
-      .sort((a, b) => (a.y + (a.height || 200)) - (b.y + (b.height || 200)));
-    
-    // Calculate Y position
-    let outputY: number;
-    if (outputNodes.length === 0) {
-      outputY = modelCenterY - (BASE_OUTPUT_SIZE / 2);
-    } else {
-      const lowestOutput = outputNodes[outputNodes.length - 1];
-      const lowestOutputHeight = lowestOutput.height || 200;
-      outputY = lowestOutput.y + lowestOutputHeight + 20;
-    }
+    // Find a non-overlapping position near the preferred location
+    const { x: outputX, y: outputY } = this.findNonOverlappingPosition(
+      preferredX,
+      preferredY,
+      BASE_OUTPUT_SIZE,
+      BASE_OUTPUT_SIZE
+    );
     
     // Create mesh output node
     const outputNodeId = graphStore.addNode('mesh-output', outputX, outputY, {
@@ -614,8 +608,76 @@ class ExecutionEngine {
   }
 
   /**
+   * Check if a rectangle overlaps with any existing node
+   */
+  private checkOverlap(x: number, y: number, width: number, height: number, excludeNodeId?: string): boolean {
+    const padding = 20; // Minimum gap between nodes
+    for (const node of graphStore.nodes.values()) {
+      if (excludeNodeId && node.id === excludeNodeId) continue;
+      const nodeW = node.width || 200;
+      const nodeH = node.height || 200;
+      // Check if rectangles overlap (with padding)
+      if (
+        x < node.x + nodeW + padding &&
+        x + width + padding > node.x &&
+        y < node.y + nodeH + padding &&
+        y + height + padding > node.y
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Find a non-overlapping position near the preferred location
+   * Prioritizes: right of source, then below, then above
+   */
+  private findNonOverlappingPosition(
+    preferredX: number,
+    preferredY: number,
+    width: number,
+    height: number
+  ): { x: number; y: number } {
+    // First try the preferred position
+    if (!this.checkOverlap(preferredX, preferredY, width, height)) {
+      return { x: preferredX, y: preferredY };
+    }
+
+    // Search in expanding rings around the preferred position
+    // Prioritize: right of source, then below, then above
+    const searchStep = 40;
+    const maxSearchRadius = 800;
+
+    // Try positions to the right first (maintaining left-to-right flow)
+    for (let offsetX = 0; offsetX <= maxSearchRadius; offsetX += searchStep) {
+      const testX = preferredX + offsetX;
+      
+      // Try at the preferred Y first
+      if (!this.checkOverlap(testX, preferredY, width, height)) {
+        return { x: testX, y: preferredY };
+      }
+      
+      // Then try positions above and below
+      for (let offsetY = searchStep; offsetY <= maxSearchRadius; offsetY += searchStep) {
+        // Try below
+        if (!this.checkOverlap(testX, preferredY + offsetY, width, height)) {
+          return { x: testX, y: preferredY + offsetY };
+        }
+        // Try above
+        if (!this.checkOverlap(testX, preferredY - offsetY, width, height)) {
+          return { x: testX, y: preferredY - offsetY };
+        }
+      }
+    }
+
+    // Fallback: just use the preferred position
+    return { x: preferredX, y: preferredY };
+  }
+
+  /**
    * Create a new output node for each generation (no wire connection)
-   * Stacks outputs vertically below previous ones
+   * Uses collision-aware placement to avoid overlapping with existing nodes
    * Returns the output node ID
    */
   private createOrUpdateOutputNode(
@@ -635,13 +697,10 @@ class ExecutionEngine {
       modelName: modelNode.params.modelName as string || 'SD 1.5',
     };
     
-    // Find all existing output nodes to the right of the model
-    // This allows us to stack below the lowest one
     const modelNodeWidth = modelNode.width || 200;
     const modelNodeHeight = modelNode.height || 200;
     
     // Calculate output node size based on actual image dimensions (maintain aspect ratio)
-    // Match the input image node sizing logic so they appear the same size
     const BASE_OUTPUT_SIZE = 200;
     const imgWidth = result.width || 512;
     const imgHeight = result.height || 512;
@@ -660,30 +719,18 @@ class ExecutionEngine {
       outputNodeWidth = Math.round(BASE_OUTPUT_SIZE * aspectRatio);
     }
     
-    // Position output to the RIGHT of the model node
-    const outputX = modelNode.x + modelNodeWidth + 40; // 40px gap to the right
-    
-    // Vertical center of model node
+    // Preferred position: to the RIGHT of the model node, vertically centered
+    const preferredX = modelNode.x + modelNodeWidth + 40; // 40px gap to the right
     const modelCenterY = modelNode.y + (modelNodeHeight / 2);
+    const preferredY = modelCenterY - (outputNodeHeight / 2);
     
-    // Find output nodes that are to the right of the model (within the output column)
-    const outputNodes = Array.from(graphStore.nodes.values())
-      .filter(node => node.type === 'output')
-      .filter(node => node.x >= modelNode.x + modelNodeWidth) // To the right of model
-      .sort((a, b) => (a.y + (a.height || 200)) - (b.y + (b.height || 200))); // Sort by bottom edge
-    
-    // Calculate Y position - align vertical center with model, or stack below previous outputs
-    let outputY: number;
-    
-    if (outputNodes.length === 0) {
-      // First output - vertically center with model node
-      outputY = modelCenterY - (outputNodeHeight / 2);
-    } else {
-      // Stack below the lowest output node (by bottom edge) with a small gap
-      const lowestOutput = outputNodes[outputNodes.length - 1];
-      const lowestOutputHeight = lowestOutput.height || 200;
-      outputY = lowestOutput.y + lowestOutputHeight + 20; // 20px gap between outputs
-    }
+    // Find a non-overlapping position near the preferred location
+    const { x: outputX, y: outputY } = this.findNonOverlappingPosition(
+      preferredX,
+      preferredY,
+      outputNodeWidth,
+      outputNodeHeight
+    );
     
     // Always create a new output node (no wire connection) with proper dimensions
     const outputNodeId = graphStore.addNode('output', outputX, outputY, {
